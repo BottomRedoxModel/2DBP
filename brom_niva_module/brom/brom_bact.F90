@@ -356,7 +356,8 @@ contains
       !anaerobic autotrophs
       ChemBaan = (mn_rd1+mn_rd2+fe_rd+hs_ox+hs_no3)&
                 *self%K_Baan_gro*Baan*min(yy(self%limBaan,NH4&
-                /(Baan+0.0001_rk)),yy(self%limBaan,PO4/(Baan+0.0001_rk)))
+                /(Baan+0.0001_rk)),yy(self%limBaan,PO4/(Baan+0.0001_rk)),&
+                yy(self%limBaan,DIC/(Baan+0.0001_rk)))
       MortBaan = self%K_Baan_mrt*Baan*Baan
       !anaerobic heterotroph
       HetBhan = (DcTOM_NOX+DcTOM_MnX+DcTOM_Fe+DcTOM_SOX+DcTOM_CH4) &

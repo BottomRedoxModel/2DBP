@@ -483,7 +483,7 @@ contains
       !Respiration of Het
       RespHet = self%K_het_res*Het*(0.5_rk+0.5_rk*tanh(O2-20._rk))
       MortHet = (0.25_rk+(0.5_rk-0.5_rk*tanh(O2-20._rk))*0.3_rk+&
-                (0.5_rk+0.4_rk*tanh(H2S-10._rk))*0.45_rk)*Het
+                (0.5_rk+0.4_rk*tanh(H2S-20._rk))*0.45_rk)*Het
 
       !Nitrogen fixation described as appearence of NH4 available for
       !phytoplankton: N2 -> NH4 :

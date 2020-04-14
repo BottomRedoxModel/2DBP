@@ -40,15 +40,18 @@
 ! !PUBLIC DERIVED TYPES:
    type,extends(type_base_model),public :: type_niva_brom_injection
 !     Variable identifiers
+! variables defined in this modules
       type (type_state_variable_id)        :: id_waste
       type (type_state_variable_id)        :: id_oxy, id_nut, id_pom, id_dom
-      type (type_dependency_id)            :: id_par, id_temp, id_salt, id_depth, id_thickness, id_vv
-      type (type_global_dependency_id)     :: id_yrdays, id_julianday
+! variables defined in this modules
+      type (type_state_variable_id)        :: id_po4, id_nh4, id_dic
+! global dependencies
+      type (type_dependency_id)            :: id_par, id_temp, id_salt, id_depth, id_thickness
       type (type_horizontal_dependency_id) :: id_long
-      type (type_diagnostic_variable_id)   :: id_waste_decay,id_waste_miner,id_waste_decomp
+      type (type_diagnostic_variable_id)   :: id_waste_diss, id_waste_miner, id_waste_decomp
 !     Model parameters
-       real(rk) :: r_waste_decay,r_waste_miner,r_waste_decomp
-       real(rk) :: Wwaste, Bu
+       real(rk) :: r_waste_diss,r_waste_miner,r_waste_decomp
+       real(rk) :: Wwaste, Bu, beta_da, Tda
    contains
       procedure :: initialize
       procedure :: do
@@ -87,16 +90,16 @@
   ! waste
    call self%get_parameter(self%r_waste_decomp, 'r_waste_decomp', '1/d', &
            'Specific rate of waste decomposition',default=0.10_rk,scale_factor=d_per_s)
-!   call self%get_parameter(self%r_waste_decay, 'r_waste_decay', '1/d', &
-!           'Specific rate of waste decay',default=0.10_rk,scale_factor=d_per_s)
+   call self%get_parameter(self%r_waste_diss, 'r_waste_diss', '1/d', &
+           'Specific rate of waste decay',default=0.10_rk,scale_factor=d_per_s)
    call self%get_parameter(self%r_waste_miner, 'r_waste_miner', '1/d', &
            'Specific rate of waste mineralization',default=0.10_rk,scale_factor=d_per_s)
    call self%get_parameter(self%Wwaste,         'Wwaste',        'm/s', &
            'vertical velocity of Waste (<0 for sinking)', default=-1.0_rk,scale_factor=d_per_s)
    call self%get_parameter(self%Bu,             'Bu',            'nd',  &
            'Burial coeficient for lower boundary',      default=0.25_rk)
-!   call self%get_parameter(self%beta_da,        'beta_da',         'nd', 'Coefficient for dependence of mineralization on t ', default=20._rk)
-!   call self%get_parameter(self%Tda,            'Tda',             'nd', 'Coefficient for dependence of mineralization on t ', default=13._rk)
+   call self%get_parameter(self%beta_da,        'beta_da',         'nd', 'Coefficient for dependence of mineralization on t ', default=20._rk)
+   call self%get_parameter(self%Tda,            'Tda',             'nd', 'Coefficient for dependence of mineralization on t ', default=13._rk)
    ! Register state variables
    call self%register_state_variable(self%id_waste,'Waste','mmol/m**3', &
            'Waste   compound ', 0.0_rk, minimum=0.0_rk, vertical_movement=self%Wwaste)
@@ -104,14 +107,17 @@
    call self%register_state_dependency(self%id_oxy,'Oxy','mmol/m**3','OXY')
    call self%register_state_dependency(self%id_pom,'POM','mmol/m**3','POM')
    call self%register_state_dependency(self%id_nut,'NUT','mmol/m**3','NUT')
-!   call self%register_state_dependency(self%id_dom,'DOM','mmol/m**3','DOM')
+   call self%register_state_dependency(self%id_dom,'DOM','mmol/m**3','DOM')
+   call self%register_state_dependency(self%id_po4,'PO4','mmol/m**3','PO4')
+   call self%register_state_dependency(self%id_nh4,'NH4','mmol/m**3','NH4')
+   call self%register_state_dependency(self%id_dic,'DIC','mmol/m**3','DIC')
    ! Register diagnostic variables
    call self%register_diagnostic_variable(self%id_waste_decomp,'waste_decomp', &
            'mmol/m**3/d',  'waste_decomp,  Decomposition of waste',&
             output=output_time_step_integrated)
-!   call self%register_diagnostic_variable(self%id_waste_decay,'waste_decay', &
-!           'mmol/m**3/d',  'waste_decay,  Decay of waste',&
-!            output=output_time_step_integrated)
+   call self%register_diagnostic_variable(self%id_waste_diss,'waste_diss', &
+           'mmol/m**3/d',  'waste_diss,  Decay of waste',&
+            output=output_time_step_integrated)
    call self%register_diagnostic_variable(self%id_waste_miner,'waste_miner', &
            'mmol/m**3/d',  'waste_miner,  Mineralization of waste with oxygen',&
             output=output_time_step_integrated)
@@ -119,12 +125,9 @@
    ! Register environmental dependencies
    call self%register_dependency(self%id_temp, standard_variables%temperature)
    call self%register_dependency(self%id_salt, standard_variables%practical_salinity)
-   call self%register_dependency(self%id_depth,standard_variables%depth)
-   call self%register_dependency(self%id_thickness,standard_variables%cell_thickness)
-!   call self%register_dependency(self%id_vv,standard_variables%volume_of_cell)
-   call self%register_dependency(self%id_long, standard_variables%longitude)
-   call self%register_dependency(self%id_julianday, standard_variables%number_of_days_since_start_of_the_year)
-   !call self%register_dependency(self%id_yrdays, standard_variables%number_of_days_since_start_of_the_year)
+!   call self%register_dependency(self%id_depth,standard_variables%depth)
+!   call self%register_dependency(self%id_thickness,standard_variables%cell_thickness)
+!   call self%register_dependency(self%id_long, standard_variables%longitude)
    
   !!!       call self%register_dependency(self%id_bedstress,standard_variables%bottom_stress)
 !     call self%register_dependency(self%id_dz, standard_variables%cell_thickness)
@@ -154,16 +157,15 @@
 !  Original author(s):
 !
 ! !LOCAL VARIABLES:
-   real(rk) ::  waste,  oxy,  pom,  nut
-   real(rk) :: dwaste, doxy, dpom, dnut
+   real(rk) ::  waste,  oxy,  pom,  nut, po4, nh4, dom, dic
+   real(rk) :: dwaste, dpom, ddom
  ! external parameters   
-   real(rk), target :: t, depth, long, thickness, yrdays
-   real(rk), target :: julianday
+   real(rk) :: t, depth,long, thickness
  ! Rates of biogeochemical processes
    real(rk) :: waste_decomp           ! decay mineralization (1/d)
-   real(rk) :: waste_decay            ! decay mineralization (1/d)
+   real(rk) :: waste_diss            ! decay mineralization (1/d)
    real(rk) :: waste_miner            ! oxic mineralization of waste (1/d)
-!   real(rk) :: waste_decay_denitr        ! suboxic mineralization of waste (denitrification) (1/d)
+!   real(rk) :: waste_diss_denitr        ! suboxic mineralization of waste (denitrification) (1/d)
 !EOP
 !-----------------------------------------------------------------------
 !BOC
@@ -175,25 +177,26 @@
    _GET_(self%id_oxy,oxy)
    _GET_(self%id_pom,pom)
    _GET_(self%id_nut,nut)
-!   _GET_(self%id_dom,dom)
+   _GET_(self%id_dom,dom)
+   _GET_(self%id_po4,po4)
+   _GET_(self%id_nh4,nh4)
+   _GET_(self%id_dic,dic)
 
    ! Retrieve current environmental conditions.
    _GET_(self%id_temp,t)                ! temperature
-   _GET_(self%id_depth,depth)           ! depth, m
-   _GET_HORIZONTAL_(self%id_long,long)  ! longitude for "dx", m
-   _GET_(self%id_thickness,thickness)   ! cell thickness, "Hz", m
-   _GET_GLOBAL_(self%id_julianday,julianday) 
+!!   _GET_(self%id_depth,depth)           ! depth, m
+!!   _GET_HORIZONTAL_(self%id_long,long)  ! longitude for "dx", m
+!!   _GET_(self%id_thickness,thickness)   ! cell thickness, "Hz", m
+
 !--------------------------------------------------------------
 ! Oxic mineralization of waste depends on T
 !!!!!!!!!!!!!!   waste_decomp = self%r_waste_decomp*waste
-   waste_decomp = self%r_waste_decomp*waste
-   waste_miner = self%r_waste_miner*waste
-   
-   write(*,*) "JD from injection: ", julianday
-   
-!   waste_decay = self%r_waste_nut_oxy*(1.+self%beta_da*yy(self%tda,t))*waste
+   waste_decomp = self%r_waste_decomp*waste*(1.0_rk+self%beta_da*yy(self%tda,t))
+   waste_miner = self%r_waste_miner*waste*(1.0_rk+self%beta_da*yy(self%tda,t))
+   waste_diss = self%r_waste_diss*waste*(1.0_rk+self%beta_da*yy(self%tda,t))
+!   waste_diss = self%r_waste_nut_oxy*(1.+self%beta_da*yy(self%tda,t))*waste
 ! Suboxic mineralization depends on T,O2,NO3/NO2
-   !waste_decay_denitr = self%r_pom_nut_nut*(1.+self%beta_da*yy(self%tda,t)) &
+   !waste_diss_denitr = self%r_pom_nut_nut*(1.+self%beta_da*yy(self%tda,t)) &
    !                        * (0.5-0.5*tanh(self%O2LimC-oxy)) &
    !                        * (1-tanh(1.-nut))*pom
 ! Mineralization of OM, ammonification and growth of NUT
@@ -204,25 +207,26 @@
 ! OXY
 !--------------------------------------------------------------
 ! Changes of OXY due to OM production and decay!
-   dwaste = -waste_decomp-waste_miner
+   dwaste = -waste_decomp-waste_miner-waste_diss
    dpom   =  waste_decomp
-   doxy   = -6.625_rk*waste_miner ! Redfield O/N
-   dnut   =  waste_miner
+   ddom   =  waste_diss
 !--------------------------------------------------------------
-
-
 
 !derivatives for FABM
    _SET_ODE_(self%id_waste,dwaste)
    _SET_ODE_(self%id_pom,  dpom)
-   _SET_ODE_(self%id_oxy,  doxy)
-   _SET_ODE_(self%id_nut,  dnut)
-!   _SET_ODE_(self%id_dom,ddom)
+   _SET_ODE_(self%id_dom,  ddom)
+!   _SET_ODE_(self%id_nut,  waste_miner) ! case OXYDEP
+   _SET_ODE_(self%id_nh4,  waste_miner)
+   _SET_ODE_(self%id_po4,  waste_miner/16.0_rk)
+   _SET_ODE_(self%id_dic,  waste_miner*6.625_rk)
+   _SET_ODE_(self%id_oxy,  -6.625*waste_miner)
 
-   
+
    ! Export diagnostic variables
 _SET_DIAGNOSTIC_(self%id_waste_decomp,waste_decomp)
 _SET_DIAGNOSTIC_(self%id_waste_miner,waste_miner)
+_SET_DIAGNOSTIC_(self%id_waste_diss,waste_diss)
    ! Leave spatial loops (if any)
    _LOOP_END_
 
@@ -256,4 +260,14 @@ _SET_DIAGNOSTIC_(self%id_waste_miner,waste_miner)
 
    end subroutine
 !-----------------------------------------------------------------------
+  !
+  ! Original author(s): Hans Burchard, Karsten Bolding
+  ! DESCRIPTION:
+  ! This is a squared Michaelis-Menten type of limiter
+  !
+  real(rk) function yy(a,x)
+    real(rk),intent(in):: a,x
+
+    yy=x**2._rk/(a**2._rk+x**2._rk)
+  end function yy
 end module
