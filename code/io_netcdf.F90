@@ -499,8 +499,8 @@
 !    istep_out = int((julianday)*86400/input_step)
     
     day_part=real(id)/real(idt)
-    i_sec=int(((i_day-1)*86400 + int(86400*id/idt))/output_step) ! time count for saving  (in array numbers)
-    istep_out = int(((julianday-1)*86400 + int(86400*id/idt))/input_step) ! time count to select data from arrays, i.e. temp, salt
+    i_sec=int(((i_day-1)*86400.0_rk + int(86400.0_rk*id/idt))/output_step) ! time count for saving  (in array numbers)
+    istep_out = int(((julianday-1)*86400.0_rk + int(86400.0_rk*id/idt))/input_step) ! time count to select data from arrays, i.e. temp, salt
  
  !Define nf90_put_var arguments "start" and "count" for z, z2, time, (cc,t,s) and (fick,kz)
     start_z = 1

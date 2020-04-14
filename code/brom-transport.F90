@@ -61,7 +61,7 @@
 
     !Forcings to be provided to FABM: These must have the POINTER attribute
     real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice
-    real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure
+    real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure, depth
     real(rk), pointer, dimension(:,:,:)        :: t, s, u_x
     real(rk), pointer, dimension(:,:,:)        :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio ! add the description cc - all params, dcc - volumes of solids
     ! vv -> 2d
@@ -80,25 +80,36 @@
     real(rk), allocatable, dimension(:,:,:,:)  :: cc_hmix_w
 
     !Grid parameters and forcings for full column including water and sediments
-    real(rk), allocatable, dimension(:)        :: z, dz, hz, x, dx, hx
+    real(rk), allocatable, dimension(:)        :: z, dz, hz, x, dx, hx, z1, z_s1
     real(rk), allocatable, dimension(:,:)      :: bc_top, bc_bottom, kz_bio, alpha, phi, phi1, phi_inv, tortuosity, kztCFL
     real(rk), allocatable, dimension(:,:)      :: wCFL, w_b, u_b, wat_content
     real(rk), allocatable, dimension(:,:,:)    :: kz, kzti, fick, fick_per_day, sink, sink_per_day, bcpar_top, bcpar_bottom
     real(rk), allocatable, dimension(:,:,:)    :: kz_mol, pF1, pF2, wti, w_bub, pWC
-    integer, allocatable, dimension(:)         :: is_solid, is_gas, k_wat, k_sed, k_sed1
+    integer, allocatable, dimension(:)         :: is_solid, is_gas, k_wat, k_sed, k_sed1, k_bbl1
     integer, allocatable, dimension(:,:)       :: bctype_top, bctype_bottom, hmixtype
+    integer, allocatable, dimension(:,:)       :: kzCFL, kz_molCFL
     character(len=attribute_length), allocatable, dimension(:)    :: par_name
 
+            ! variables for building the grid
+    integer                                   :: sel, iday, istep
+!    integer                                   :: k_sed(k_max-k_bbl_sed), k_sed1(k_max+1-k_bbl_sed), k_bbl1(k_bbl_sed-k_wat_bbl)
+    real(rk)                                  :: z_wat_bbl, z_bbl_sed, kz_gr !, z1(k_max+1), z_s1(k_max+1), phi1(i_max,k_max+1)
+    integer                                   :: dynamic_kz_bbl
+    real(rk)                                  :: kz_bbl_max, dbl_thickness, kz_mol0
+    real(rk)                                  :: a1_bioirr, a2_bioirr
+    real(rk)                                  :: kz_bioturb_max, z_const_bioturb, z_decay_bioturb
+    real(rk)                                  :: phi_0, phi_inf, z_decay_phi, w_binf, rho_def, wat_con_0, wat_con_inf
+!    real(rk)                                  :: kzCFL(k_bbl_sed-1,steps_in_yr), kz_molCFL(k_max-1,par_max)
+    
+    
     !Constant forcings that can be read as parameters from brom.yaml
     real(rk) :: wind_speed, pco2_atm, mu0_musw, dphidz_SWI , dx_min, dx_max ! dx_adv
     real(rk), allocatable, dimension(:)        :: rho
 
     !Counters
-    integer   :: i, k, ip, ip_sol, ip_par !, i_dummy AB
+    integer   :: i, k, ip, ip_sol, ip_par, kj, ij !, i_dummy AB
     real(rk)  :: i_dummy ! AB
-	
-	! Fake z 2d
-	real(rk), allocatable, dimension(:,:) :: zs
+
 
     contains
 
@@ -155,6 +166,38 @@
     h_turb =  get_brom_par("h_turb")
 !    dx_adv = get_brom_par("dx_adv")
 	
+	! vertical grid params
+    
+    !!Get diffusivity parameters from brom.yaml
+    !Turbulence in the benthic boundary layer
+    kz_bbl_type = get_brom_par("kz_bbl_type")
+    kz_bbl_max = get_brom_par("kz_bbl_max")
+    dbl_thickness = get_brom_par("dbl_thickness")
+    dynamic_kz_bbl = get_brom_par("dynamic_kz_bbl")
+
+    !Molecular diffusivity of solutes (single constant value, infinite dilution)
+    kz_mol0 = get_brom_par("kz_mol0")
+    mu0_musw = get_brom_par("mu0_musw")
+
+    !Bioturbation
+    kz_bioturb_max = get_brom_par("kz_bioturb_max")
+    z_const_bioturb = get_brom_par("z_const_bioturb")
+    z_decay_bioturb = get_brom_par("z_decay_bioturb")
+
+    !Bioirrigation
+    a1_bioirr = get_brom_par("a1_bioirr")
+    a2_bioirr = get_brom_par("a2_bioirr")
+
+    !Porosity
+    phi_0 = get_brom_par("phi_0")
+    phi_inf = get_brom_par("phi_inf")
+    z_decay_phi = get_brom_par("z_decay_phi")
+    wat_con_0 = get_brom_par("wat_con_0")
+    wat_con_inf = get_brom_par("wat_con_inf")
+
+    !Vertical advection in the sediments
+    w_binf = get_brom_par("w_binf")
+
 	! horizontal grid params
 	dx_min = get_brom_par("dx_min")
 	dx_max = get_brom_par("dx_max")
@@ -250,6 +293,7 @@
     
     write(*,*) "All other boundary conditions use surface and bottom fluxes from FABM"
 
+    
     !Input forcing data
     if (input_type.eq.0) then !Input sinusoidal seasonal changes (hypothetical)
         call input_primitive_physics(z_w, dz_w, hz_w, k_wat_bbl, water_layer_thickness, t_w, s_w, kz_w, i_max, days_in_yr)
@@ -288,11 +332,11 @@
     allocate(x(i_max))
     allocate(dx(i_max))
     allocate(hx(i_max))
-    allocate(t(i_max,k_max,steps_in_yr+1))
-    allocate(s(i_max,k_max,steps_in_yr+1))
-    allocate(kz(i_max,k_max+1,steps_in_yr+1))
-    allocate(kl(i_max,k_max,steps_in_yr+1))
-    allocate(u_x(i_max,k_max,steps_in_yr+1))
+    allocate(t(i_max,k_max,steps_in_yr))
+    allocate(s(i_max,k_max,steps_in_yr))
+    allocate(kz(i_max,k_max+1,steps_in_yr))
+    allocate(kl(i_max,k_max,steps_in_yr))
+    allocate(u_x(i_max,k_max,steps_in_yr))
     allocate(cc_hmix(i_max,par_max,k_max,days_in_yr))
     allocate(kz_mol(i_max,k_max+1,par_max))
     allocate(kz_bio(i_max,k_max+1))
@@ -322,11 +366,17 @@
     allocate(dvv(i_max,k_max,1))
     allocate(Izt(i_max,k_max))
     allocate(pressure(i_max,k_max))
+    allocate(depth(i_max,k_max))
     allocate(kzti(i_max,k_max+1,par_max))
     allocate(kztCFL(k_max-1,par_max))
     allocate(wCFL(k_max-1,par_max))
-    
-    allocate(zs(i_max,k_max))
+!    allocate(k_sed(k_max-k_bbl_sed))
+!    allocate(k_sed1(k_max+1-k_bbl_sed))
+    allocate(k_bbl1(k_bbl_sed-k_wat_bbl))
+    allocate(z1(k_max+1))
+    allocate(z_s1(k_max+1))
+    allocate(kzCFL(k_bbl_sed-1,steps_in_yr))
+    allocate(kz_molCFL(k_max-1,par_max))
 
     if (k_points_below_water==0) then  !This is to "unlock" BBL and sediments for a "classical" water column model
         k_max=k_wat_bbl
@@ -345,7 +395,7 @@
         k_sed = (/(k,k=k_bbl_sed+1,k_max)/) !Index vector for all points in the sediments
         k_sed1 = (/(k,k=k_bbl_sed+1,k_max+1)/) !Indices of layer interfaces in the sediments (including the SWI)
     endif
-   
+
     !Specify horizontal transport
     !dx(:)= dx_adv !horizontal resolution in m
     write(*,*) dx_min, dx_max
@@ -388,18 +438,12 @@
     do i=1,i_max
         pressure(i,:) = z(:) + 10.0_rk
     end do
-	
+
     !Point FABM to array slices with biogeochemical state.
     do ip=1,par_max
         call fabm_link_bulk_state_data(model, ip, cc(:,:,ip))
     end do
 
-	! 2d z
-	do i=i_min,i_max
-		do k=k_min,k_max
-			zs(i,k) = z(k)
-		end do
-	end do
 
     !Link temperature and salinity data to FABM (needs to be redone every time julianday is updated below)
     call fabm_link_bulk_data(model, standard_variables%temperature, t(:,:,1))
@@ -407,16 +451,12 @@
     !Link other data needed by FABM
     call fabm_link_bulk_data(model, standard_variables%downwelling_photosynthetic_radiative_flux, Izt)  !W m-2
     call fabm_link_bulk_data(model, standard_variables%pressure, pressure)                              !dbar
+    call fabm_link_bulk_data(model, standard_variables%depth, depth)                                    !m
     call fabm_link_horizontal_data(model, standard_variables%wind_speed, windspeed)                     !m s-1
     call fabm_link_horizontal_data(model, standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2atm)  !ppm
     if (use_hice.eq.1) call fabm_link_horizontal_data(model, ice_thickness, hice)
-    !call fabm_link_bulk_data(model, volume_of_cell, vv(:,:,1))
-    call fabm_link_bulk_data(model, standard_variables%cell_thickness, vv(:,:,1)) ! debug
-    
-    call fabm_link_bulk_data(model, standard_variables%depth, zs(:,:))  
-    call fabm_link_horizontal_data(model, standard_variables%longitude, dx) 
+    call fabm_link_bulk_data(model, volume_of_cell, vv(:,:,1))
 
-	call model%link_scalar(standard_variables%number_of_days_since_start_of_the_year, 1._rk)
 
     !Check FABM is ready
     call fabm_check_ready(model)
@@ -440,7 +480,17 @@
           vv(i,:,:) = vv(1,:,:) 
        enddo
     endif
-                                                
+
+    !Check biological parameters for non-zero values
+        do ip=1,par_max
+            if (ip.eq.id_Phy.or.ip.eq.id_Het.or.ip.eq.id_Baae.or.ip.eq.id_Baan.or.ip.eq.id_Bhae.or.ip.eq.id_Bhan) then 
+                do i=1,i_max
+                    do k=1,k_max
+                        if(cc(i,k,ip).le.0.0_rk) cc(i,k,ip)= 1.0E-11
+                    enddo
+                enddo
+            endif
+        enddo 
     
 
     !Initialize output
@@ -474,26 +524,267 @@
     end do
 
 
+    !Density of particles
+    rho_def = get_brom_par("rho_def")
+    rho = 0.0_rk
+    do ip=1,par_max
+        if (is_solid(ip).eq.1) then
+            rho(ip) = get_brom_par('rho_' // trim(par_name(ip)),rho_def)
+            write(*,*) "Assumed density of ", trim(par_name(ip)), " = ", rho(ip)
+        end if
+    end do
+
+
     !Complete hydrophysical forcings
     cc_hmix=0.0_rk
- !   call make_physics_bbl_sed(t, s, kz, kl, cc_hmix, u_x, u_x_w, t_w, s_w, kz_w, cc_hmix_w, kz_mol, kz_bio, &
- !       z, dz, hz, i_min, i_max, k_wat_bbl, k_bbl_sed, k_max, par_max, steps_in_yr, alpha, is_solid, phi, phi1, phi_inv, &
- !       pF1, pF2, mu0_musw, tortuosity, w_b, u_b, rho, dt, freq_turb, par_name, diff_method, bioturb_across_SWI, &
- !       ip_sol, ip_par, dphidz_SWI, wat_content, pWC, input_step)
-        
-    call make_physics_bbl_sed_old(t, s, kz, kl, cc_hmix, u_x, u_x_w, t_w, s_w, kz_w, cc_hmix_w, kz_mol, kz_bio, &
-        z, dz, hz, i_min, i_max, k_wat_bbl, k_bbl_sed, k_max, par_max, steps_in_yr-1, alpha, is_solid, phi, phi1, phi_inv, &
-        pF1, pF2, mu0_musw, tortuosity, w_b, u_b, rho, dt, freq_turb, par_name, diff_method, bioturb_across_SWI, &
-        ip_sol, ip_par, dphidz_SWI, wat_content, pWC, input_step)    
- 
- !  call make_physics_bbl_sed_old(t, s, kz, kl, cc_hmix, u_x, u_x_w, t_w, s_w, kz_w, cc_hmix_w, kz_mol, kz_bio, &
- !       z, dz, hz, i_min, i_max, k_wat_bbl, k_bbl_sed, k_max, par_max, days_in_yr, alpha, is_solid, phi, phi1, phi_inv, &
- !       pF1, pF2, mu0_musw, tortuosity, w_b, u_b, rho, dt, freq_turb, par_name, diff_method, bioturb_across_SWI, &
- !       ip_sol, ip_par, dphidz_SWI, wat_content, pWC)    
-        
+    
+    !!Set useful parameters for calculations
+    !Useful depths
+    z_wat_bbl = z(k_wat_bbl+1) - 0.5_rk*hz(k_wat_bbl+1) !Depth of water-BBL interface
+    z_bbl_sed = z(k_bbl_sed+1) - 0.5_rk*hz(k_bbl_sed+1) !Depth of BBL-sediment interface (SWI)
+    z1(1:k_max) = z(:)-0.5_rk*hz(:)         !Depth of layer interfaces
+    z1(k_max+1) = z(k_max)+0.5_rk*hz(k_max)
+    z_s1 = z1-z_bbl_sed                     !Depth of interfaces wrt SWI
+
+    !Useful index vectors
+    k_sed = (/(k,k=k_bbl_sed+1,k_max)/) !Indices of layer midpoints in the sediments
+    k_sed1 = (/(k,k=k_bbl_sed+1,k_max+1)/) !Indices of layer interfaces in the sediments (including the SWI)
+    k_bbl1 = (/(k,k=k_wat_bbl+1,k_bbl_sed)/) !Indices of layer interfaces in the BBL (including the top)
+
+
+    !!Calculate physical forcings
+    !Assume (t, s, cc, hmix_rate) at layer midpoints; (kz, w_b) on interfaces (as in GOTM and ROMS grids):
+    !Note: kz vertical index starts from 1, not 0 as in e.g. GOTM, ROMS
+    !      Using index starting from 0 leads to array misalignment passing between subroutines (PWA, 11/03/2016)
+    !
+    !========= (air-sea interface) kz(1), w_b(1) (unused)
+    !    o     t(1), s(1), cc(1), hmix_rate(1)
+    !--------- kz(2), w_b(2) = 0
+    !    o     t(2), s(2), cc(2), hmix_rate(2)
+    !    :
+    !    :
+    !    o     t(k_wat_bbl), s(k_wat_bbl), cc(k_wat_bbl), hmix_rate(k_wat_bbl)
+    !========= (water-bbl interface) kz(k_wat_bbl+1) = kz_bbl or kz_bbl_max
+    !    o     t(k_wat_bbl+1), s(k_wat_bbl+1), cc(k_wat_bbl+1), hmix_rate(k_wat_bbl+1) = 0
+    !--------- kz(k_wat_bbl+2) = kz_bbl  (if kz_bbl_type = 0)
+    !    o     t(k_wat_bbl+2), s(k_wat_bbl+2), cc(k_wat_bbl+2), hmix_rate(k_wat_bbl+2) = 0
+    !    :
+    !    :
+    !    o     t(k_bbl_sed), s(k_bbl_sed), cc(k_bbl_sed), hmix_rate(k_bbl_sed) = 0
+    !========= (bbl-sediment interface) kz(k_bbl_sed+1) = 0, w_b(k_bbl_sed+1)
+    !    o     t(k_bbl_sed+1), s(k_bbl_sed+1), cc(k_bbl_sed+1), hmix_rate(k_bbl_sed+1) = 0
+    !--------- kz(k_bbl_sed+2) = 0, w_b(k_bbl_sed+2)
+    !    o     t(k_bbl_sed+2), s(k_bbl_sed+2), cc(k_bbl_sed+2), hmix_rate(k_bbl_sed+2) = 0
+    !    :
+    !    :
+    !    o     t(k_max), s(k_max), cc(k_max), hmix_rate(k_max) = 0
+    !========= (bottom) kz(k_max+1), w_b(k_max+1)
+    kz = 0.0_rk
+!    hmix_rate = 0.0_rk
+!    cc_hmix = 0.0_rk
+    !Calculation below are for water column horizontal index
+  do i = i_min, i_max
+    iday = 1
+    do istep=1,steps_in_yr
+
+
+        if (mod(istep,int(86400/input_step)).eq.0) then
+!		if (mod(istep,24).eq.0) then
+		    iday = iday + 1
+		end if
+
+        !Salinity (s)
+        s(i,1:k_wat_bbl,istep)       = s_w(i,1:k_wat_bbl,istep)
+        s(i,k_wat_bbl+1:k_max,istep) = s_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
+
+        !Temperature (t)
+        t(i,1:k_wat_bbl,istep)       = t_w(i,1:k_wat_bbl,istep)
+        t(i,k_wat_bbl+1:k_max,istep) = t_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
+
+        !Horizontal advection (u_x)
+        u_x(i,1:k_wat_bbl,istep)       = u_x_w(i,1:k_wat_bbl,istep)
+        !Linear u_x across BBL (to be checked!)
+                !kz_gr = (0.0_rk-kz_bbl_max) / (z_bbl_sed-dbl_thickness-z_wat_bbl)
+                !Note: u_x is assumed to reach zero at height dbl_thickness above the SWI
+                do k=k_wat_bbl+1,k_bbl_sed-1
+                    !u_x(i,k,istep) = max(0.0_rk, u_x_w(i,k_wat_bbl,istep) + kz_gr * (z1(k)-z_wat_bbl)) 
+                    ! velosity profile (Cushman-Roisin, Beckers, 2011) U(Z)=(U*/K)*ln(Z-Z0)
+                    ! were Z-distance from bottom, Z0-roughness, K=0.4 von Karman const, U*- friction velosity.
+                    ! 0.07 here is for (U*/K) normalization  
+                    u_x(i,k,istep) = (1.0_rk/log((z(k_bbl_sed+1)-z(k_wat_bbl+1))/dbl_thickness)) &
+                        *u_x_w(i,k_wat_bbl,istep)*log((z(k_bbl_sed+1)-z(k))/dbl_thickness)
+                    !u_x(i,k,istep) =0.0_rk
+                end do
+!        u_x(i,k_wat_bbl+1:k_max,istep) = 0.0_rk !Assume zero below z_wat_bbl
+        u_x(i,k_bbl_sed+1:k_max,istep) = 0.0_rk !Assume zero below z_wat_bbl
+
+        !Vertical diffusivity in water column (kz)
+        kz(i,1:k_wat_bbl,istep)      = kz_w(i,1:k_wat_bbl,istep) !Use all values on upper layer interfaces in water column
+
+        if (dynamic_kz_bbl.eq.0) then !Static kz_bbl
+            if (kz_bbl_type.eq.0) then !Constant kz across BBL
+                do k=k_wat_bbl+1,k_bbl_sed
+                    if (z1(k) < (z_bbl_sed-dbl_thickness)) then !Note that kz(k) is at depth z1(k) = z(k)-hz(k)/2
+                        kz(i,k,istep) = kz_bbl_max
+                    else
+                        kz(i,k,istep) = 0.0_rk !eddy diffusivity kz is assumed to be zero within the diffusive boundary layer
+                    end if
+                end do
+            end if
+            if (kz_bbl_type.eq.1) then !Linear kz across BBL (~=> log-layer for velocity, Holtappels & Lorke, 2011)
+                kz_gr = (0.0_rk-kz_bbl_max) / (z_bbl_sed-dbl_thickness-z_wat_bbl)
+                !Note: kz is assumed to reach zero at height dbl_thickness above the SWI
+                do k=k_wat_bbl+1,k_bbl_sed
+                    kz(i,k,istep) = max(0.0_rk, kz_bbl_max + kz_gr * (z1(k)-z_wat_bbl)) !Note that kz(k) is at depth z1(k) = z(k)-hz(k)/2
+                end do
+            end if
+        end if
+
+        if (dynamic_kz_bbl.eq.1) then !Dynamic kz_bbl
+            kz_gr = (0.0_rk-kz(i,k_wat_bbl,istep)) / (z_bbl_sed-dbl_thickness-z1(k_wat_bbl))
+            do k=k_wat_bbl+1,k_bbl_sed
+                kz(i,k,istep) = max(0.0_rk, kz(i,k_wat_bbl,istep) + kz_gr * (z1(k)-z1(k_wat_bbl))) !Note that kz(k) is at depth z1(k) = z(k)-hz(k)/2
+            end do
+        end if
+
+        !Warning if the diffusive CFL condition is > 0.5
+        kzCFL(:,istep) = (kz(i,2:k_bbl_sed,istep)*dt/freq_turb)/(dz(1:k_bbl_sed-1)**2)
+        if (diff_method.eq.0.and.maxval(kzCFL(:,istep)).gt.0.5_rk) then
+            write(*,*) "WARNING!!! CFL condition due to eddy diffusivity exceeds 0.5 on day", istep
+            write(*,*) "z_L, kz, kzCFL = "
+            do k=1,k_bbl_sed-1
+                if (kzCFL(k,istep).gt.0.5_rk) write(*,*) z(k)+hz(k)/2, kz(i,k+1,istep), kzCFL(k,istep)
+            end do
+        end if
+
+        !Horizontal mixing rate (hmix_rate) and reservoir concentrations (cc_hmix)
+!        hmix_rate(i,1:k_wat_bbl,istep) = 0.0_rk 
+!        cc_hmix(i,1:par_max,1:k_wat_bbl,iday) = 0.0_rk !cc_hmix_w(i,1:par_max,1:k_wat_bbl,iday)
+    end do
+  enddo
+    !Porosity (phi) (assumed constant in time)
+    phi = 1.0_rk
+    phi_inv = 1.0_rk/phi
+    wat_content = 1.0_rk
+    phi1 = 1.0_rk
+    !Calculation below are for water column horizontal index
+  do i = i_min, i_max
+    phi(i,k_sed) = phi_inf + (phi_0-phi_inf)*exp(-1.0_rk*(z(k_sed)-z_bbl_sed)/z_decay_phi)
+    dphidz_SWI = -1.0_rk * (phi_0-phi_inf) / z_decay_phi
+    !water content (wat_content) (assumed constant in time)
+    wat_content(i,k_sed) = wat_con_inf + (wat_con_0-wat_con_inf)*exp(-1.0_rk*(z(k_sed)-z_bbl_sed)/z_decay_phi)
+    !Porosity on layer interfaces (phi1)
+    phi1(i,k_sed) = phi_inf + (phi_0-phi_inf)*exp(-1.0_rk*(z(k_sed)-0.5_rk*hz(k_sed)-z_bbl_sed)/z_decay_phi)
+    phi1(i,k_max+1) = phi_inf + (phi_0-phi_inf)*exp(-1.0_rk*(z(k_max)+0.5_rk*hz(k_max)-z_bbl_sed)/z_decay_phi)
+  enddo
+    !Porosity factors used in diffusivity calculations (pF1, pF2)
+    !(assumed constant in time but will vary between solutes vs. solids)
+    !These allow us to use a single equation to model diffusivity updates in the water column and sediments, for both solutes and solids:
+    ! dC/dt = d/dz(pF2*kzti*d/dz(pF1*C)) where C has units [mass per unit total volume (water+sediments)]
+    pF1 = 1.0_rk
+    pF2 = 1.0_rk
+    pWC = 1.0_rk
+    !Calculation below are for water column horizontal index
+      do i = i_min, i_max
+    do ip=1,par_max
+        if (is_solid(ip).eq.0) then !Factors for solutes
+            pF1(i,k_sed,ip) = 1.0_rk/phi(i,k_sed)            !Factor to convert [mass per unit total volume] to [mass per unit volume pore water] for solutes in sediments
+            pF2(i,k_sed1,ip) = phi1(i,k_sed1)                !Porosity-related area restriction factor for fluxes across layer interfaces
+            pWC(i,k_sed,ip) = 1.0_rk/wat_content(i,k_sed)    !Factor to convert [mass per unit total volume] to [mass per unit volume pore water] for solutes in sediments (for analytical data)
+            ! dC/dt = d/dz(kzti*dC/dz)                               in the water column
+            ! dC/dt = d/dz(phi*kzti*d/dz(C/phi))                     in the sediments
+        end if
+        if (is_solid(ip).eq.1) then !Factors for solids
+            pF1(i,k_sed,ip) = 1.0_rk/(1.0_rk - phi(i,k_sed)) !Factor to convert [mass per unit total volume] to [mass per unit volume solids] for solids in sediments
+            pF2(i,k_sed1,ip) = 1.0_rk - phi1(i,k_sed1)       !Porosity-related area restriction factor for fluxes across layer interfaces
+            pWC(i,k_sed,ip) = 1.0_rk/(1.0_rk - wat_content(i,k_sed)) !Factor to convert [mass per unit total volume] to [mass per unit volume solids] for solids in sediments (for analytical data)
+            ! dC/dt = d/dz(kzti*dC/dz)                               in the water column
+            ! dC/dt = d/dz((1-phi)*kzti*d/dz(C/(1-phi)))             in the sediments
+        end if
+    end do
+    !Tortuosity on layer interfaces (following Boudreau 1996, equatoin 4.120)
+    tortuosity(i,:) = sqrt(1.0_rk - 2.0_rk*log(phi1(i,:)))
+  enddo
+
+    kz_mol = 0.0_rk
+    kz_bio = 0.0_rk
+    alpha = 0.0_rk
+    
+        !Calculation below are for water column horizontal index
+  do i = i_min, i_max
+    !Vertical diffusivity due to effective molecular diffusivity of solutes in the sediments (kz_mol)
+    !(assumed constant in time but in general may vary between solutes)
+    do ip=1,par_max
+        if (is_solid(ip).eq.0) then
+            kz_mol(i,1:k_max+1,ip) = kz_mol0
+            kz_mol(i,k_sed1,ip) = mu0_musw * kz_mol0/(tortuosity(i,k_sed1)**2)
+
+            !Warning if the diffusive CFL condition is > 0.5
+            kz_molCFL(:,ip) = (kz_mol(i,2:k_max,ip)*dt/freq_turb)/(dz(1:k_max-1)**2)
+            if (diff_method.eq.0.and.maxval(kz_molCFL(:,ip)).gt.0.5_rk) then
+                write(*,*) "WARNING!!! CFL condition due to molecular diffusivity exceeds 0.5 for variable", trim(par_name(ip))
+                write(*,*) "z_L, kz_mol, kz_molCFL = "
+                do k=1,k_max-1
+                    if (kz_molCFL(k,ip).gt.0.5_rk) write(*,*) z(k)+hz(k)/2, kz_mol(i,k+1,ip), kz_molCFL(k,ip)
+                end do
+            end if
+        end if
+    end do
+    !Vertical diffusivity due to bioturbation (kz_bio)
+    !(assumed constant in time and between solutes/solids)
+    do k=k_bbl_sed+(2-bioturb_across_SWI),k_max+1  !Note: bioturbation diffusivity is assumed to be non-zero on the SWI
+        if (z_s1(k)<z_const_bioturb) then
+            kz_bio(i,k) = kz_bioturb_max
+        else
+            kz_bio(i,k) = kz_bioturb_max*exp(-1.0_rk*(z_s1(k)-z_const_bioturb)/z_decay_bioturb)
+        end if
+    end do
+
+    !Bioirrigation rate (alpha)
+    !(assumed constant in time and between solutes)
+    alpha(i,k_sed) = a1_bioirr*exp(-1.0_rk*a2_bioirr*(z(k_sed)-z_bbl_sed)) !Schluter et al. (2000), Eqn. 2
+  enddo
+    !Calculation below are for water column horizontal index
+    !Background vertical advective velocities of particulates and solutes on layer interfaces in the sediments (w_b, u_b)
+    !(these assume steady state compaction and neglect reaction terms)
+    w_b = 0.0_rk
+    u_b = 0.0_rk
+    !Calculation below are for water column horizontal index
+  do i = i_min, i_max
+    w_b(i,k_sed1) = ((1.0_rk - phi_inf)/(1.0_rk - phi1(i,k_sed1))) * w_binf !Boudreau (1997), Eqn 3.67; Holzbecher (2002) Eqn 3
+    u_b(i,k_sed1) = (phi_inf/phi1(i,k_sed1)) * w_binf !Boudreau (1997), Eqn 3.68; Holzbecher (2002) Eqn 12
+    !do k=k_bbl_sed-1,k_max
+    !  w_b(i,:) =  w_binf
+    !  u_b(i,:) =  w_binf
+    !enddo
+  enddo 
+
+    !!Write to output file
+    open(12,FILE='Hydrophysics.dat')
+    write(12,'(6hiday  ,5hk    ,5hi    ,11hhz[m]      ,11hz[m]       ,11hz_H[m]     ,9ht[degC]  ,10hs[psu]    ,16hKz_H[m2/s]      ,18hKz_mol1_H[m2/s]   , 18hKz_bio_H[m2/s]    , 18hu[m/s]            , 18hstep              ,15halpha[/s]      ,5hphi  ,14htortuosity_H  ,17hw_bH [1E-10 m/s]  ,17hu_bH [1E-10 m/s]  )')
+        iday=1
+        do istep=1,steps_in_yr
+            if (mod(istep,int(86400/input_step)).eq.0) then
+!            if (mod(istep,24).eq.0) then
+		        iday = iday + 1
+		    end if
+            do k=1,k_max
+                write (12,'(2(1x,i4))',advance='NO') istep, k
+                do i=1,i_max 
+                    write(12,'(1x,i4,f10.4,1x,f10.4,1x,f10.4,2(1x,f8.4),1x,f15.11,1x,f17.13,1x,f17.13,12x,f7.4,12x,i5,1x,f15.11,f7.4,1x,f7.4,12x,f7.4,12x,f7.4)',advance='NO') &
+                        i, hz(k), z(k), (z(k)-0.5_rk*hz(k)),&
+                        t(i,k,istep), s(i,k,istep), kz(i,k,istep), kz_mol(i,k,1), &
+                        kz_bio(i,k), u_x(i,k,istep), istep, &
+                        alpha(i,k), phi(i,k), tortuosity(i,k), &
+                        1.E10*w_b(i,k), 1.E10*u_b(i,k) 
+                end do
+                write(12,*)
+            end do
+        end do
+    close(12)
+
     write(*,*) "Made physics of BBL, sediments"
 
-    !if(h_relax.eq.1.) then   
     !Get horizontal relaxation parameters from brom.yaml:
     !hmixtype = 0, 1 or 2  for no horizontal relaxation (default), box model mixing respectively
         do ip=1,par_max
@@ -582,11 +873,10 @@
     real(rk)     :: w_bub0                   ! baseline rate of floating up of bubbles
     real(rk)     :: bu_co                   ! "Burial coeficient" for setting velosity exactly to the SWI proportional to the 
                                            !   settling velocity in the water column (0<bu_co<1), 0 - for no setting velosity, (nd)
+    real(rk)     :: N_bubbles              ! Number of rising up bubbles
     real(rk)     :: injection_rate                   ! injection rate
     real(rk)     :: injection_rate_ini               ! injection rate initial constant or multiplier if injection rate is a function
     character(len=attribute_length), allocatable, dimension(:)    :: inj_var_name
-
-	real(rk)     :: jd
 
     omega = 2.0_rk*pi/365.0_rk
 
@@ -597,6 +887,7 @@
     constant_w_sed = get_brom_par("constant_w_sed")
     fresh_PM_poros = get_brom_par("fresh_PM_poros")
     w_binf = get_brom_par("w_binf")
+    N_bubbles = get_brom_par("N_bubbles")
     w_bub0 = get_brom_par("w_bub0")
     bu_co = get_brom_par("bu_co")
     cc0 = get_brom_par("cc0")
@@ -656,10 +947,6 @@
 
         julianday = i_day - int(i_day/days_in_yr)*days_in_yr + 1    !"julianday" (1,2,...,days_in_yr)
         if (julianday==1) model_year = model_year + 1
-
-		jd = real(julianday)*1._rk
-		! DEBUG
-		call model%link_scalar(standard_variables%number_of_days_since_start_of_the_year, jd)
 
         write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000.
         !If including ice using horizontal coordinate, set ice volume in top cell of ice column
@@ -822,12 +1109,6 @@
             endif
         enddo
 
-       !_______Bubble floating_________!
-        do i=i_min, i_max
-            call calculate_bubble(i, k_max, par_max, model, cc, w_bub, &
-               sink, dcc, hz, dz, k_bbl_sed, julianday, dt, freq_float, is_gas, wbio, cc0)
-        enddo
-
        !_______Calculate changes of volumes of cells_________!
         dVV(:,:,1)=0.0
         do i=i_min, i_max
@@ -838,7 +1119,12 @@
                 dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,ip))/rho(ip)
               end if
            end do
-        enddo    
+        enddo  
+          if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e, a, e,a, e, a, e)') " i_day:", &
+              i_day, " model_year:", model_year, "; julianday:", julianday, &
+              "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
+              wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
+              wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,12)    
         
        !________Horizontal relaxation_________!
         if (h_relax.eq.1) then          
@@ -882,10 +1168,10 @@
             do ip=1,par_max
                 do i=i_min+1, i_max-1
                     do k=1,k_wat_bbl
-!                      dcc(i,k,ip) = max(0.0_rk, u_x(i,k,istep))*(cc(i-1,k,ip)-cc(i,k,ip))/dx(i)  &
-!                                  + max(0.0_rk,-u_x(i,k,istep))*(cc(i+1,k,ip)-cc(i,k,ip))/dx(i)  
-                      dcc(i,k,ip) = max(0.0_rk, u_x(i,k,istep))*(cc(i-1,k,ip)-cc(i+1,k,ip))/dx(i)/2._rk  &
-                                  + max(0.0_rk,-u_x(i,k,istep))*(cc(i+1,k,ip)-cc(i-1,k,ip))/dx(i)/2._rk  
+                      dcc(i,k,ip) = max(0.0_rk, u_x(i,k,istep))*(cc(i-1,k,ip)-cc(i,k,ip))/dx(i)  &
+                                  + max(0.0_rk,-u_x(i,k,istep))*(cc(i+1,k,ip)-cc(i,k,ip))/dx(i)  
+!                      dcc(i,k,ip) = max(0.0_rk, u_x(i,k,istep))*(cc(i-1,k,ip)-cc(i+1,k,ip))/dx(i)/2._rk  &
+!                                  + max(0.0_rk,-u_x(i,k,istep))*(cc(i+1,k,ip)-cc(i-1,k,ip))/dx(i)/2._rk  
                     enddo              
                 end do
                     do k=1,k_wat_bbl
@@ -934,68 +1220,84 @@
                     if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
                     inj_num = ip+1           
                 end do 
-                cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))
-                cc(i_inj+4,k_inj,inj_num)=cc(i_inj+4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj))
-                cc(i_inj+2,k_inj,inj_num)=cc(i_inj+2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj))
-                cc(i_inj-4,k_inj,inj_num)=cc(i_inj-4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj))
-                cc(i_inj-2,k_inj,inj_num)=cc(i_inj-2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj))
-             
-                cc(i_inj,k_inj-1,inj_num)=cc(i_inj,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj-1))
-                cc(i_inj+4,k_inj-1,inj_num)=cc(i_inj+4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj-1))
-                cc(i_inj+2,k_inj-1,inj_num)=cc(i_inj+2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj-1))
-                cc(i_inj-4,k_inj-1,inj_num)=cc(i_inj-4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj-1))
-                cc(i_inj-2,k_inj-1,inj_num)=cc(i_inj-2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj-1))
+
+!from 26.02.2020 we use  (after Wang et al., 2012) :			
+!Inj O2 / Inj Waste-N [molO2/molN] = 34,1			
+!Inj DIC / Inj Waste-N [molC/molN] = 27.3			
+!Inj NH4 / Inj Waste-N  [molN/molN] = 2.50 		strict definition	
+!Inj DOML (DON) / Inj Waste-N [molN/molN]= 0.80 			
+!Inj PO4 / Inj Waste-N  [molN/molN] = 0.0998
+
+              do kj = k_inj-1, k_inj
+                do ij= i_inj-2,i_inj+2, 2
+                  cc(ij,kj,inj_num)=cc(ij,kj,inj_num)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                  cc(ij,kj,id_O2)=cc(ij,kj,id_O2)    -dt*34.0_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                  cc(ij,kj,id_PO4)=cc(ij,kj,id_PO4)  +dt*0.10_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                  cc(ij,kj,id_NH4)=cc(ij,kj,id_NH4)  +dt*2.5_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                  cc(ij,kj,id_DIC)=cc(ij,kj,id_DIC)  +dt*27.3_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                  cc(ij,kj,id_DOML)=cc(ij,kj,id_DOML)+dt*0.8_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+                enddo
+              enddo
+              
             end if 
         end if
         
-        if (i_day.gt.start_inj2.and.i_day.le.stop_inj2.and.i_max.gt.0) then
-            injection_rate = 0.5*max(0., 90.2614*sin(0.0054*(i_day-start_inj2))+6.3394*sin(2*0.0054*(i_day-start_inj2)) &
-                              +10.7102*sin(3*0.0054*(i_day-start_inj2))-1.0403*sin(4*0.0054*(i_day-start_inj2)) &
-                              -22.2653*sin(5*0.0054*(i_day-start_inj2))+8.0852*sin(6*0.0054*(i_day-start_inj2)) )&
-                              *injection_rate_ini
-            if (inj_swith.eq.1)  then
-                do ip = 1, par_max
-                    if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
-                    inj_num = ip+1           
-                end do 
-                cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))
-                cc(i_inj+4,k_inj,inj_num)=cc(i_inj+4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj))
-                cc(i_inj+2,k_inj,inj_num)=cc(i_inj+2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj))
-                cc(i_inj-4,k_inj,inj_num)=cc(i_inj-4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj))
-                cc(i_inj-2,k_inj,inj_num)=cc(i_inj-2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj))
-             
-                cc(i_inj,k_inj-1,inj_num)=cc(i_inj,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj-1))
-                cc(i_inj+4,k_inj-1,inj_num)=cc(i_inj+4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj-1))
-                cc(i_inj+2,k_inj-1,inj_num)=cc(i_inj+2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj-1))
-                cc(i_inj-4,k_inj-1,inj_num)=cc(i_inj-4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj-1))
-                cc(i_inj-2,k_inj-1,inj_num)=cc(i_inj-2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj-1))
-            end if 
-        end if
+!        if (i_day.gt.start_inj2.and.i_day.le.stop_inj2.and.i_max.gt.0) then
+!            injection_rate = 0.5*max(0., 90.2614*sin(0.0054*(i_day-start_inj2))+6.3394*sin(2*0.0054*(i_day-start_inj2)) &
+!                              +10.7102*sin(3*0.0054*(i_day-start_inj2))-1.0403*sin(4*0.0054*(i_day-start_inj2)) &
+!                              -22.2653*sin(5*0.0054*(i_day-start_inj2))+8.0852*sin(6*0.0054*(i_day-start_inj2)) )&
+!                              *injection_rate_ini
+!            if (inj_swith.eq.1)  then
+!                do ip = 1, par_max
+!                    if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
+!                    inj_num = ip+1           
+!                end do 
+!
+!              do kj = k_inj-1, k_inj
+!                do ij= i_inj,i_inj !-2,i_inj+2, 2
+!                  cc(ij,kj,inj_num)=cc(ij,kj,inj_num)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!!                  cc(ij,kj,id_DOML)=cc(ij,kj,id_DOML)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_O2)=cc(ij,kj,id_O2)  -dt*2._rk*6.625_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_PO4)=cc(ij,kj,id_PO4)+dt*2._rk/16.0_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_NH4)=cc(ij,kj,id_NH4)+dt*2._rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_DIC)=cc(ij,kj,id_DIC)+dt*2._rk*6.625_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                enddo
+!              enddo
+!
+!            end if 
+!        end if
 
-        if (i_day.gt.start_inj3.and.i_day.le.stop_inj3.and.i_max.gt.0) then
-            injection_rate = 0.5*max(0., 90.2614*sin(0.0054*(i_day-start_inj3))+6.3394*sin(2*0.0054*(i_day-start_inj3)) &
-                              +10.7102*sin(3*0.0054*(i_day-start_inj3))-1.0403*sin(4*0.0054*(i_day-start_inj3)) &
-                              -22.2653*sin(5*0.0054*(i_day-start_inj3))+8.0852*sin(6*0.0054*(i_day-start_inj3)) )&
-                              *injection_rate_ini
-            if (inj_swith.eq.1)  then
-                do ip = 1, par_max
-                    if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
-                    inj_num = ip+1           
-                end do 
-                cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))
-                cc(i_inj+4,k_inj,inj_num)=cc(i_inj+4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj))
-                cc(i_inj+2,k_inj,inj_num)=cc(i_inj+2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj))
-                cc(i_inj-4,k_inj,inj_num)=cc(i_inj-4,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj))
-                cc(i_inj-2,k_inj,inj_num)=cc(i_inj-2,k_inj,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj))
-             
-                cc(i_inj,k_inj-1,inj_num)=cc(i_inj,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj-1))
-                cc(i_inj+4,k_inj-1,inj_num)=cc(i_inj+4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+4)*dx(i_inj+4)*dz(k_inj-1))
-                cc(i_inj+2,k_inj-1,inj_num)=cc(i_inj+2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj+2)*dx(i_inj+2)*dz(k_inj-1))
-                cc(i_inj-4,k_inj-1,inj_num)=cc(i_inj-4,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-4)*dx(i_inj-4)*dz(k_inj-1))
-                cc(i_inj-2,k_inj-1,inj_num)=cc(i_inj-2,k_inj-1,inj_num)+dt*injection_rate/(dx(i_inj-2)*dx(i_inj-2)*dz(k_inj-1))
-            end if 
-        end if
+!        if (i_day.gt.start_inj3.and.i_day.le.stop_inj3.and.i_max.gt.0) then
+!            injection_rate = 0.5*max(0., 90.2614*sin(0.0054*(i_day-start_inj3))+6.3394*sin(2*0.0054*(i_day-start_inj3)) &
+!                              +10.7102*sin(3*0.0054*(i_day-start_inj3))-1.0403*sin(4*0.0054*(i_day-start_inj3)) &
+!                              -22.2653*sin(5*0.0054*(i_day-start_inj3))+8.0852*sin(6*0.0054*(i_day-start_inj3)) )&
+!                              *injection_rate_ini
+!            if (inj_swith.eq.1)  then
+!                do ip = 1, par_max
+!                    if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
+!                    inj_num = ip+1           
+!                end do 
 
+!              do kj = k_inj-1, k_inj
+!                do ij= i_inj-2,i_inj+2, 2
+!                  cc(ij,kj,inj_num)=cc(ij,kj,inj_num)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_DOML)=cc(ij,kj,id_DOML)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_O2)=cc(ij,kj,id_O2)-dt*6.625_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_PO4)=cc(ij,kj,id_PO4)+dt/16.0_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_NH4)=cc(ij,kj,id_NH4)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                  cc(ij,kj,id_DIC)=cc(ij,kj,id_DIC)+dt*6.625_rk*injection_rate/(dx(ij)*dx(ij)*dz(kj))
+!                enddo
+!              enddo
+
+!            end if 
+!        end if
+
+       !_______Bubble rising_________!
+        do i=i_min, i_max
+            call calculate_bubble(i, k_max, par_max, model, cc, sink, N_bubbles, &
+                dcc, hz, dz, z, t, k_bbl_sed, julianday, dt, freq_float, &
+               is_gas, wbio, cc0)
+        enddo
         
         !________Check for NaNs (stopping if any found)____________________!
         do ip=1,par_max
@@ -1189,9 +1491,6 @@
     deallocate(x)
     deallocate(dx)
     deallocate(hx)
-    
-    deallocate(zs)
-    
     if (diff_method.gt.0) call clean_tridiagonal()
 
     end subroutine clear_brom_transport
