@@ -629,7 +629,7 @@
                     !u_x(i,k,istep) =0.0_rk
                 end do
 !        u_x(i,k_wat_bbl+1:k_max,istep) = 0.0_rk !Assume zero below z_wat_bbl
-        u_x(i,k_bbl_sed+1:k_max,istep) = 0.0_rk !Assume zero below z_wat_bbl
+        u_x(i,k_bbl_sed:k_max,istep) = 0.0_rk !Assume zero below z_wat_bbl
 
         !Vertical diffusivity in water column (kz)
         kz(i,1:k_wat_bbl,istep)      = kz_w(i,1:k_wat_bbl,istep) !Use all values on upper layer interfaces in water column
@@ -1032,8 +1032,8 @@
                 do i=i_min, i_max
                     dcc = 0.0_rk
                     !Oxygen status of sediments set by O2 level just above sediment surface
- !                   O2stat = cc(i,k_bbl_sed,id_O2) / (cc(i,k_bbl_sed,id_O2) + K_O2s)   
-                    O2stat = cc(i,k_bbl_sed,id_Oxy) / (cc(i,k_bbl_sed,id_Oxy) + K_O2s)   
+                    O2stat = cc(i,k_bbl_sed,id_O2) / (cc(i,k_bbl_sed,id_O2) + K_O2s)   
+ !                   O2stat = cc(i,k_bbl_sed,id_Oxy) / (cc(i,k_bbl_sed,id_Oxy) + K_O2s)   
                     do ip=1,par_max
                         if (is_solid(ip).eq.0) then
                             !Calculate tendencies dcc
@@ -1144,7 +1144,8 @@
               end if
            end do
         enddo  
-          if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e4.2, a, e4.2, a, e4.2, a, e4.2)') " i_day:", &
+        i = 1
+          if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, e9.3, a, e9.3, a, e9.3)') " i_day:", &
               i_day, " model_year:", model_year, "; julianday:", julianday, &
               "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
               wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
