@@ -8,13 +8,14 @@
 ! the COPYING file at the root of the BROM distribution.
 !-----------------------------------------------------------------------
 ! Original author(s): Evgeniy Yakushev, Shamil Yakubov,
-!                     Elizaveta Protsenko, Phil Wallhead
+!                     Elizaveta Protsenko, Phil Wallhead,
+!                     Anfisa Berezina, Matvey Novikov
 !-----------------------------------------------------------------------
 
 
     module io_ascii
 
-    use fabm, only: type_model, fabm_get_bulk_diagnostic_data
+    use fabm, only: type_fabm_model
     use fabm_driver
     use yaml_types
     use yaml,yaml_parse=>parse,yaml_error_length=>error_length
@@ -200,7 +201,7 @@
     current => first
     do
         if (.not.associated(current)) exit
-        if (trim(initname) == trim(current%initname)) then
+        if (initname == current%initname) then
             realvalue = current%realvalue
             return
         end if
@@ -313,7 +314,7 @@
         do k=1,k_max
             read(9, '( i5 )', advance = 'no') foo
             read(9, '( i5 )', advance = 'no') foo
-            read(9, '( 1x,f8.4 )', advance = 'no') value !we don't read again z()
+            read(9, '( 1x,f10.4 )', advance = 'no') value !we don't read again z()
             do m=1,4
                 read(9, '( 1x,f15.9 )', advance = 'no') value !we don't read again t,s,Kz,hz
             end do
@@ -354,7 +355,7 @@
     real(rk), dimension(:,:,:), intent(in)     :: cc
     real(rk), dimension(:,:,:), intent(in)     :: vv
     real(rk), dimension (:,:,:), intent(in)    :: t, s, kz
-    type (type_model), intent(in)              :: model
+    class (type_fabm_model), pointer :: model
     logical, intent(in)                        :: extend_out
 
     !Local variables
@@ -376,10 +377,10 @@
     end do
 
     if (extend_out .eqv. .true.) then
-        do ip = 1, size(model%diagnostic_variables)
-            if (model%diagnostic_variables(ip)%save) then
-                ilast = index(model%diagnostic_variables(ip)%path,'/',.true.)
-                write(10,'(1x,a)',advance='NO') trim(model%diagnostic_variables(ip)%path(ilast+1:))
+        do ip = 1, size(model%interior_diagnostic_variables)
+            if (model%interior_diagnostic_variables(ip)%save) then
+                ilast = index(model%interior_diagnostic_variables(ip)%path,'/',.true.)
+                write(10,'(1x,a)',advance='NO') trim(model%interior_diagnostic_variables(ip)%path(ilast+1:))
             end if
         end do
     end if
@@ -390,7 +391,7 @@
         do k=1,k_max
             write(10,'(i5)',advance='NO') i
             write(10,'(i5)',advance='NO') k
-            write(10,'(1x,f8.4)',advance='NO') z(k)
+            write(10,'(1x,f10.4)',advance='NO') z(k)
             write(10,'(1x,f15.9)',advance='NO') t(i,k,julianday)
             write(10,'(1x,f15.9)',advance='NO') s(i,k,julianday)
             write(10,'(1x,f15.9)',advance='NO') kz(i,k,julianday)
@@ -400,10 +401,10 @@
                 write(10,'(1x,f15.9)',advance='NO') cc(i,k,ip)
             end do
             if (extend_out .eqv. .true.) then
-                do ip = 1, size(model%diagnostic_variables)
-                    if (model%diagnostic_variables(ip)%save) then
+                do ip = 1, size(model%interior_diagnostic_variables)
+                    if (model%interior_diagnostic_variables(ip)%save) then
                         !temp_matrix = fabm_get_bulk_diagnostic_data(model, ip)
-                        write(10,'( 1x,f15.9 )',advance='NO') fabm_get_bulk_diagnostic_data(model, ip)
+                        write(10,'( 1x,f15.9 )',advance='NO') model%get_interior_diagnostic_data(ip)
 
                     end if
                 end do
@@ -461,7 +462,7 @@
         do k=1,k_max
             write(10,'(i5)',advance='NO') i
             write(10,'(i5)',advance='NO') k
-            write(10,'(1x,f8.4)',advance='NO') z(k)
+            write(10,'(1x,f10.4)',advance='NO') z(k)
             write(10,'(1x,f15.9)',advance='NO') t(i,k,julianday)
             write(10,'(1x,f15.9)',advance='NO') s(i,k,julianday)
             write(10,'(1x,f15.9)',advance='NO') kz(i,k,julianday)
@@ -595,10 +596,10 @@
 
     !Record the vertical grid in an ascii output file
     open(10,FILE = 'Vertical_grid.dat')
-    write(10,'(5h k   ,5hz[k]   ,6hdz[k]   ,6hhz[k] )')
+    write(10,'(5h k   ,6hz[k]    ,6hdz[k]   ,7hhz[k]  )')
     do k=1,k_max
-        write(10,'(1x,i4, 1x,f8.4, 5h _o_ , 1x,f8.4)') k,z(k),hz(k)
-        write(10,'(2x,i4, 5h ===  , 1x,f8.4,5h ===  )') k,dz(k)
+        write(10,'(1x,i4, 1x,f9.4, 5h _o_ , 1x,f9.4)') k,z(k),hz(k)
+        write(10,'(2x,i4, 6h ====  , 1x,f8.4,6h ====  )') k,dz(k)
     end do
     close(10)
 

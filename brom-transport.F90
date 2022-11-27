@@ -8,17 +8,18 @@
 ! the COPYING file at the root of the BROM distribution.
 !-----------------------------------------------------------------------
 ! Original author(s): Evgeniy Yakushev, Shamil Yakubov,
-!                     Elizaveta Protsenko, Phil Wallhead
-!                     Anfisa Berezina 
+!                     Elizaveta Protsenko, Phil Wallhead,
+!                     Anfisa Berezina, Matvey Novikov 
 !-----------------------------------------------------------------------
-
+!
+! Code was adapted for FABM-1.0.3
+! More info https://github.com/fabm-model/fabm/wiki/FABM-1.0
+!-----------------------------------------------------------------------
     module brom_transport
 
     ! AB check fabm subroutines
     use fabm
-    use fabm_config
-    use fabm_types, only: attribute_length, rk ! check attribute_length
-    use fabm_standard_variables ! T, S, light, CO2 concentration etc
+    use fabm_types  !, only: attribute_length, rk ! check attribute_length
     use io_netcdf
     use io_ascii 
     use mtridiagonal, only: init_tridiagonal,clean_tridiagonal
@@ -32,26 +33,26 @@
 	real(rk), parameter :: pi=3.141592653589793_rk
 
     !FABM model with all data and procedures related to biogeochemistry
-    type (type_model) :: model
-    type (type_horizontal_standard_variable),parameter :: &
-        ice_thickness = type_horizontal_standard_variable(name=' ice_thickness',units='m') ! horizontal - 2D
-    type (type_bulk_standard_variable),parameter :: & ! check if used!!
-        volume_of_cell = type_bulk_standard_variable(name=' volume_of_cell')
+    class (type_fabm_model), pointer :: model
 
+    type (type_horizontal_standard_variable), parameter :: id_hice = type_horizontal_standard_variable(name='hice',units='m') ! horizontal - 2D
+    type (type_horizontal_standard_variable), parameter :: id_aice = type_horizontal_standard_variable(name='aice',units='-')
+    type (type_interior_standard_variable) :: & ! check if used!!
+        volume_of_cell = type_interior_standard_variable(name='volume_of_cell')
 
     !Solution parameters to be read from brom.yaml (see brom.yaml for details)
     integer   :: i_min, i_max       !x-axis related 
     integer   :: k_min, k_wat_bbl,k_wat_bbl_manual, k_bbl_sed !z-axis related
-    integer   :: k_points_below_water, k_max !z-axis related
+    integer   :: k_points_below_water, k_max, k_storm !z-axis related
     integer   :: par_max                     !no. BROM variables
     integer   :: i_day, year, days_in_yr, freq_turb, freq_sed, freq_float, last_day   !time related ! ?? freq_sed, freq_turb
     integer   :: diff_method, kz_bbl_type, bioturb_across_SWI  !vertical diffusivity related
-    integer   :: h_adv, h_relax, h_turb  !horizontal transport  (advection and relaxation) switches
+    integer   :: h_adv, h_relax, not_relax_centr, h_turb  !horizontal transport  (advection and relaxation) switches
     integer   :: use_Eair, use_hice, use_gargett ! use input for light, ice, calculate Kz
     integer   :: input_type, port_initial_state, ncoutfile_type !I/O related
     integer   :: use_leak, i_leak, start_leak !leak related
     real(rk)  :: dt, water_layer_thickness, cc_leak, cc_leak2, w_leak_adv
-    real(rk)  :: K_O2s, gargett_a0, gargett_q, mult_Kz
+    real(rk)  :: K_O2s, gargett_a0, gargett_q, mult_Kz, Kz_storm
     
     ! Free timestep input and output
     integer   :: ist, i_step, input_step, steps_in_yr, output_step ! ist - steps in the course of the day, i_step - step in the course of the year
@@ -60,14 +61,14 @@
     character :: hmix_file
 
     !Forcings to be provided to FABM: These must have the POINTER attribute
-    real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice
-    real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure, depth
+    real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice, aice, swradWm2
+    real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure, depth, cell_thickness
     real(rk), pointer, dimension(:,:,:)        :: t, s, u_x
-    real(rk), pointer, dimension(:,:,:)        :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio ! add the description cc - all params, dcc - volumes of solids
+    real(rk), pointer, dimension(:,:,:)        :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio, air_sea_flux ! add the description cc - all params, dcc - volumes of solids
     ! vv -> 2d
 
     !Surface and bottom forcings, used within brom-transport only
-    real(rk), allocatable, dimension(:)      :: Eair
+    real(rk), allocatable, dimension(:)        :: Eair
     real(rk), allocatable, dimension(:,:,:)    :: cc_top, cc_bottom
 
     !Horizontal mixing forcings, used within brom-transport only
@@ -103,7 +104,7 @@
     
     
     !Constant forcings that can be read as parameters from brom.yaml
-    real(rk) :: wind_speed, pco2_atm, mu0_musw, dphidz_SWI , dx_min, dx_max ! dx_adv
+    real(rk) :: wind_speed, pco2_atm, mu0_musw, dphidz_SWI , dx_min, dx_max, dy ! dx_adv
     real(rk), allocatable, dimension(:)        :: rho
 
     !Counters
@@ -139,6 +140,7 @@
     last_day = get_brom_par("last_day")
     water_layer_thickness = get_brom_par("water_layer_thickness")
     k_min = get_brom_par("k_min")
+    k_storm = get_brom_par("k_storm")
 !    k_wat_bbl = get_brom_par("k_wat_bbl")
     k_wat_bbl_manual = get_brom_par("k_wat_bbl_manual")
     k_points_below_water = get_brom_par("k_points_below_water")
@@ -164,6 +166,7 @@
     K_O2s = get_brom_par("K_O2s")
     h_adv =  get_brom_par("h_adv")
     h_relax =  get_brom_par("h_relax")
+    not_relax_centr =  get_brom_par("not_relax_centr")
     h_turb =  get_brom_par("h_turb")
 !    dx_adv = get_brom_par("dx_adv")
 	
@@ -202,10 +205,12 @@
 	! horizontal grid params
 	dx_min = get_brom_par("dx_min")
 	dx_max = get_brom_par("dx_max")
+	dy = get_brom_par("dy")
     use_gargett = get_brom_par("use_gargett")
     gargett_a0 = get_brom_par("gargett_a0")
     gargett_q = get_brom_par("gargett_q")
     mult_Kz = get_brom_par("mult_Kz")
+    Kz_storm = get_brom_par("Kz_storm")
     use_leak = get_brom_par("use_leak")
     i_leak = get_brom_par("i_leak")
     start_leak = get_brom_par("start_leak")
@@ -213,8 +218,8 @@
     cc_leak = get_brom_par("cc_leak")
     cc_leak2 = get_brom_par("cc_leak2")
     !Initialize FABM model from fabm.yaml
-    call fabm_create_model_from_yaml_file(model)
-    par_max = size(model%state_variables)
+    model => fabm_create_model()
+    par_max = size(model%interior_state_variables)
 
     steps_in_yr = days_in_yr*24*3600/input_step ! determine how much timesteps in the course of the year
 
@@ -241,7 +246,7 @@
 
     !Retrieve the parameter names from the model structure
     do ip=1,par_max
-        par_name(ip) = model%state_variables(ip)%name
+        par_name(ip) = model%interior_state_variables(ip)%name
     end do
     !Make the named parameter indices id_O2 etc.
     call get_ids(par_name)
@@ -288,7 +293,7 @@
         bc_bottom(:,ip) = bc_bottom(i_max,ip)
         do k=1,3
           bcpar_top(:,ip,k) = bcpar_top(i_max,ip,k)
-          bcpar_bottom(:,ip,k) = bcpar_bottom(i_max,ip,k)
+ !         bcpar_bottom(:,ip,k) = bcpar_bottom(i_max,ip,k)
         enddo
     end do
     
@@ -299,23 +304,31 @@
         call input_primitive_physics(z_w, dz_w, hz_w, k_wat_bbl, water_layer_thickness, t_w, s_w, kz_w, i_max, days_in_yr)
         allocate(Eair(days_in_yr))
         allocate(hice(days_in_yr))
+        allocate(swradWm2(days_in_yr))
+        allocate(aice(days_in_yr))
         Eair = 0.0_rk
         hice = 0.0_rk
+        swradWm2 = 0.0_rk
+        aice = 0.0_rk
         write(*,*) "Done sinusoidal input"
     end if
     if (input_type.eq.1) then !Input physics from ascii
         call input_ascii_physics(z_w, dz_w, hz_w, k_wat_bbl, water_layer_thickness, t_w, s_w, kz_w, i_max, days_in_yr)
         allocate(Eair(days_in_yr))
         allocate(hice(days_in_yr))
+        allocate(swradWm2(days_in_yr))
+        allocate(aice(days_in_yr))
         allocate(cc_hmix_w(i_max,par_max,k_wat_bbl,days_in_yr))
         cc_hmix_w = 0.0_rk
         Eair = 0.0_rk
         hice = 0.0_rk
+        swradWm2 = 0.0_rk
+        aice = 0.0_rk
         write(*,*) "Done ascii input"
     end if
     if (input_type.eq.2) then !Input water column physics from netcdf
         call input_netcdf_2(z_w, dz_w, hz_w, t_w, s_w, kz_w, Eair, use_Eair, &
-        hice, use_hice, gargett_a0, gargett_q, use_gargett, &
+        hice, swradWm2, aice, use_hice, gargett_a0, gargett_q, use_gargett, &
         year, i_max, steps_in_yr, k_wat_bbl, u_x_w)
         kz_w=kz_w*mult_Kz
         write(*,*) "Done netcdf input"
@@ -335,6 +348,7 @@
     allocate(t(i_max,k_max,steps_in_yr))
     allocate(s(i_max,k_max,steps_in_yr))
     allocate(kz(i_max,k_max+1,steps_in_yr))
+    allocate(air_sea_flux(i_max,k_max,par_max))
     allocate(kl(i_max,k_max,steps_in_yr))
     allocate(u_x(i_max,k_max,steps_in_yr))
     allocate(cc_hmix(i_max,par_max,k_max,days_in_yr))
@@ -365,7 +379,8 @@
     allocate(vv(i_max,k_max,1))
     allocate(dvv(i_max,k_max,1))
     allocate(Izt(i_max,k_max))
-    allocate(pressure(i_max,k_max))
+    allocate(pressure(i_max,k_max)) 
+    allocate(cell_thickness(i_max,k_max)) 
     allocate(depth(i_max,k_max))
     allocate(kzti(i_max,k_max+1,par_max))
     allocate(kztCFL(k_max-1,par_max))
@@ -425,7 +440,7 @@
         !allocate u_x_w
         x=0.0_rk
         u_x_w=0.0_rk
-        dx=1.0_rk 
+        dx=dx_min 
     endif
     !Initialize tridiagonal matrix if necessary
     if (diff_method.gt.0) then
@@ -434,11 +449,12 @@
     end if
 
     !Set model domain
-    call fabm_set_domain(model,i_max,k_max)
+    call model%set_domain(i_max,k_max)
 
-    !Specify vertical index of surface and bottom
-    call model%set_surface_index(k_min)
-    call model%set_bottom_index(k_max)
+    !!!!! DELETE ME !!!!!
+    ! !Specify vertical index of surface and bottom
+    ! call model%set_surface_index(k_min)
+    ! call model%set_bottom_index(k_max)
 
     !Initial volumes of layers:
     vv(i:i_max,1:k_max,1) = 1.0_rk
@@ -448,39 +464,46 @@
     !and by brom_carb.F90 to compute equilibrium constants for saturation states (subroutine CARFIN)
     do i=1,i_max
         pressure(i,:) = z(:) + 10.0_rk
+        cell_thickness(i,:) = hz(:)
     end do
 
     !Point FABM to array slices with biogeochemical state.
     do ip=1,par_max
-        call fabm_link_bulk_state_data(model, ip, cc(:,:,ip))
+        call model%link_interior_state_data(ip, cc(:,:,ip))
     end do
 
-
     !Link temperature and salinity data to FABM (needs to be redone every time julianday is updated below)
-    call fabm_link_bulk_data(model, standard_variables%temperature, t(:,:,1))
-    call fabm_link_bulk_data(model, standard_variables%practical_salinity, s(:,:,1))
+    call model%link_interior_data(fabm_standard_variables%temperature, t(:,:,1))
+    call model%link_interior_data(fabm_standard_variables%practical_salinity, s(:,:,1))
+
     !Link other data needed by FABM
-    call fabm_link_bulk_data(model, standard_variables%downwelling_photosynthetic_radiative_flux, Izt)  !W m-2
-    call fabm_link_bulk_data(model, standard_variables%pressure, pressure)                              !dbar
-    call fabm_link_bulk_data(model, standard_variables%depth, depth)                                    !m
-    call fabm_link_horizontal_data(model, standard_variables%wind_speed, windspeed)                     !m s-1
-    call fabm_link_horizontal_data(model, standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2atm)  !ppm
-    if (use_hice.eq.1) call fabm_link_horizontal_data(model, ice_thickness, hice)
-    call fabm_link_bulk_data(model, volume_of_cell, vv(:,:,1))
-!    call model%link_scalar(standard_variables%number_of_days_since_start_of_the_year,julianday)
+    call model%link_interior_data(fabm_standard_variables%downwelling_photosynthetic_radiative_flux, Izt)  !W m-2
+    call model%link_interior_data(fabm_standard_variables%pressure, pressure)                              !dbar
+    call model%link_interior_data(fabm_standard_variables%depth, depth)                            !dbar
+    call model%link_interior_data(fabm_standard_variables%cell_thickness, cell_thickness)
+    call model%link_horizontal_data(fabm_standard_variables%wind_speed, windspeed)
+    call model%link_horizontal_data(fabm_standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2atm)
+    call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(1:1))
+    
+    if (use_hice.eq.1) then
+        call model%link_horizontal_data(type_horizontal_standard_variable(name='hice'), hice(1:1))
+        call model%link_horizontal_data(type_horizontal_standard_variable(name='aice'), aice(1:1))
+    endif
+    
+   call model%link_interior_data(volume_of_cell, vv(:,:,1))
 
 
     !Check FABM is ready
-    call fabm_check_ready(model)
+    call model%start()
 
 
     !Allow FABM models to use their default initialization (this sets cc)
     do k=1,k_max
-        call fabm_initialize_state(model, 1, i_max, k)
+        call model%initialize_interior_state(1, i_max, k)
     end do
     
            vv=1._rk
-    
+
     !Read initial values from ascii file if req'd
     if (port_initial_state.eq.1) call porting_initial_state_variables(trim(icfile_name), year, &
                                                 i_day, i_max, k_max, par_max, par_name, cc, vv)
@@ -499,7 +522,7 @@
             if (ip.eq.id_Phy.or.ip.eq.id_Het.or.ip.eq.id_Baae.or.ip.eq.id_Baan.or.ip.eq.id_Bhae.or.ip.eq.id_Bhan) then 
                 do i=1,i_max
                     do k=1,k_max
-                        if(cc(i,k,ip).le.0.0_rk) cc(i,k,ip)= 1.0E-11
+                        if(cc(i,k,ip).le.0.0_rk) cc(i,k,ip)= 1.0E-7 !-11
                     enddo
                 enddo
             endif
@@ -511,7 +534,7 @@
 
     !Establish which variables will be treated as solid phase in the sediments, based on the biological velocity (sinking/floating) from FABM.
     wbio = 0.0_rk
-    call fabm_get_vertical_movement(model, i_max, i_max, k_wat_bbl, wbio(i_max:i_max,k_wat_bbl,:))
+    call model%get_vertical_movement(i_max, i_max, k_wat_bbl, wbio(i_max:i_max,k_wat_bbl,:))
     do i=i_min,i_max-1
         wbio(i,:,:)=wbio(i_max,:,:)
     enddo
@@ -598,9 +621,8 @@
     !Calculation below are for water column horizontal index
   do i = i_min, i_max
     iday = 1
+    
     do istep=1,steps_in_yr
-
-
         if (mod(istep,int(86400/input_step)).eq.0) then
 !		if (mod(istep,24).eq.0) then
 		    iday = iday + 1
@@ -608,12 +630,16 @@
 
         !Salinity (s)
         s(i,1:k_wat_bbl,istep)       = s_w(i,1:k_wat_bbl,istep)
-        s(i,k_wat_bbl+1:k_max,istep) = s_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
-
         !Temperature (t)
         t(i,1:k_wat_bbl,istep)       = t_w(i,1:k_wat_bbl,istep)
-        t(i,k_wat_bbl+1:k_max,istep) = t_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
-
+        do k=k_wat_bbl,k_max 
+                s(i,k,istep) = s_w(i,k_wat_bbl-1,istep) !Assume constant below z_wat_bbl
+                t(i,k,istep) = t_w(i,k_wat_bbl-1,istep) !Assume constant below z_wat_bbl
+        enddo
+!        do k=k_wat_bbl+1,k_max 
+!                s(i,k,istep) = s_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
+!                t(i,k,istep) = t_w(i,k_wat_bbl,istep) !Assume constant below z_wat_bbl
+!        enddo
         !Horizontal advection (u_x)
         u_x(i,1:k_wat_bbl,istep)       = u_x_w(i,1:k_wat_bbl,istep)
         !Linear u_x across BBL (to be checked!)
@@ -883,12 +909,12 @@
     real(rk)     :: tau_relax                        ! relaxation time (AB)
     real(rk)     :: fresh_PM_poros                   ! porosity of fresh precipitated PM (i.e. dVV) 
     real(rk)     :: w_binf                   ! baseline rate of burying
-    real(rk)     :: w_bub0                   ! baseline rate of floating up of bubbles
     real(rk)     :: bu_co                   ! "Burial coeficient" for setting velosity exactly to the SWI proportional to the 
                                            !   settling velocity in the water column (0<bu_co<1), 0 - for no setting velosity, (nd)
     real(rk)     :: N_bubbles              ! Number of rising up bubbles
     real(rk)     :: injection_rate                   ! injection rate
     real(rk)     :: injection_rate_ini               ! injection rate initial constant or multiplier if injection rate is a function
+    real(rk)     :: start_inj_part_day     ! share of day to start injection first day (0=midnight, 0.75= 18h00m etc.)
     character(len=attribute_length), allocatable, dimension(:)    :: inj_var_name
 
     omega = 2.0_rk*pi/365.0_rk
@@ -901,7 +927,6 @@
     fresh_PM_poros = get_brom_par("fresh_PM_poros")
     w_binf = get_brom_par("w_binf")
     N_bubbles = get_brom_par("N_bubbles")
-    w_bub0 = get_brom_par("w_bub0")
     bu_co = get_brom_par("bu_co")
     cc0 = get_brom_par("cc0")
     a1_bioirr = get_brom_par("a1_bioirr")
@@ -922,6 +947,7 @@
     i_inj = get_brom_par("i_injection") 
     inj_switch = get_brom_par("injection_switch")
     start_inj = get_brom_par("start_inj")
+    start_inj_part_day = get_brom_par("start_inj_part_day")
     stop_inj = get_brom_par("stop_inj")    
     start_inj2 = get_brom_par("start_inj2")
     stop_inj2 = get_brom_par("stop_inj2")    
@@ -952,7 +978,10 @@
     do i=1, i_max
         cc(i,:,:)=cc(1,:,:)
     enddo
-    
+ !_____Patch for STORM_______________________________!
+    if(k_storm.gt.0) then
+        kz(:,1:(k_storm),:)=Kz_storm 
+    endif
  !_______BIG Cycle ("i_day"=0,...,last_day-1)________!
 	ist=1
 	istep=1
@@ -973,6 +1002,7 @@
         !Note: The numerical approach here is Operator Splitting with tracer transport processes assumed to be
         !numerically more demanding than the biogeochemistry (hence freq_turb, freq_sed >= 1) (Butenschon et al., 2012)
 
+!                write (*,'(a, i4, a, i8)') "-julianday:", julianday,"; id:", id
 
         !Set time-varying Dirichlet boundary conditions for current julianday
         do ip=1,par_max
@@ -1000,19 +1030,30 @@
         enddo        
         
         
-      !Calculate Izt = <PAR(z)>_24hr for this day
-      do i=i_min, i_max
-          call calculate_light(julianday, i, k_bbl_sed, k_max, par_max, hz, &
-                               Eair, use_Eair, hice, use_hice, cc, is_solid, rho, Izt)
-      enddo
+      !Calculate Izt = <PAR(z)>_24hr for this dayF
+      !do i=i_min, i_max
+      !    call calculate_light(julianday, i, k_bbl_sed, k_max, par_max, hz, &
+      !                         Eair, use_Eair, hice, use_hice, cc, is_solid, rho, Izt)
+      !enddo
 
       if (mod(int(id*dt),input_step).eq.0) then  
         ist = int((id*int(dt))/input_step)
         istep = int((julianday-1)*(24*3600/input_step)) + ist
         
-        ! Reload changes in t and s (needed for FABM/biology)
-        call fabm_link_bulk_data(model, standard_variables%temperature, t(:,:,istep))
-        call fabm_link_bulk_data(model, standard_variables%practical_salinity, s(:,:,istep))
+      ! Reload changes in t, s, light, ice (needed for FABM/biology)
+        call model%link_interior_data(fabm_standard_variables%temperature, t(:,:,istep))
+        call model%link_interior_data(fabm_standard_variables%practical_salinity, s(:,:,istep))
+       
+        if (use_hice.eq.1) then
+            call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(istep:istep))
+            call model%link_horizontal_data(type_horizontal_standard_variable(name='hice'), hice(istep:istep))
+            call model%link_horizontal_data(type_horizontal_standard_variable(name='aice'),aice(istep:istep))
+        else
+   !         decl = 23.5_rk*sin(2.0_rk*pi*(real(julianday,rk)-81.0_rk)/365.0_rk) !Solar declination in degrees
+   !         swradWm2(istep:istep) = max(0.0_rk, Io*cos((lat_light-decl)*pi/180.0_rk))
+            call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(istep:istep))
+        endif
+        
       endif
       
 	  i_count_pr=0
@@ -1029,8 +1070,8 @@
 
         !_______bioirrigation_____________!
             if (a1_bioirr.gt.0.0_rk) then
+                dcc = 0.0_rk
                 do i=i_min, i_max
-                    dcc = 0.0_rk
                     !Oxygen status of sediments set by O2 level just above sediment surface
                     O2stat = cc(i,k_bbl_sed,id_O2) / (cc(i,k_bbl_sed,id_O2) + K_O2s)   
  !                   O2stat = cc(i,k_bbl_sed,id_Oxy) / (cc(i,k_bbl_sed,id_Oxy) + K_O2s)   
@@ -1060,51 +1101,62 @@
             end if
 
             !_____water_biogeochemistry_______!
+            call model%prepare_inputs()  ! This ensures that all variables that the source routines depend on are computed. 
             dcc = 0.0_rk
-            do i=i_min, i_max
-                do k=1,k_max
-                call fabm_do(model, i, i, k, dcc(i:i,k,:))   !to ask Jorn
-                !Note: We MUST pass the range "i:i" to fabm_do -- a single value "i" will produce compiler error
+            do k=1,k_max
+               call model%get_interior_sources(i_min, i_max, k, dcc(i_min:i_max,k,:)) 
             end do
+
             !Add surface and bottom fluxes if treated here
             if (surf_flux_with_diff.eq.0) then
                 surf_flux = 0.0_rk
-                call fabm_do_surface(model, i, i, surf_flux(i:i,:))
-                fick(i,k_min,:) = surf_flux(i,:)
+                call model%get_surface_sources(i_min, i_max, surf_flux(i_min:i_max,:))
+                fick(i_min:i_max,k_min,:) = surf_flux(i_min:i_max,:)
                 do ip=1,par_max
-                    dcc(i,k_min,ip) = dcc(i,k_min,ip) + surf_flux(i,ip) / hz(k_min)
+                    dcc(i_min:i_max,k_min,ip) = dcc(i_min:i_max,k_min,ip) + surf_flux(i_min:i_max,ip) / hz(k_min)
                 end do
             end if
-            
+
             if (bott_flux_with_diff.eq.0) then
                 bott_flux = 0.0_rk
-                bott_source = 0.0_rk                
-                call fabm_do_bottom(model, i, i, bott_flux(i:i,:),bott_source(i:i,:))
-                sink(i,k_max+1,:) = bott_flux(i,:)
+                bott_source = 0.0_rk
+                call model%get_bottom_sources(i_min, i_max, bott_flux(i_min:i_max,:),bott_source(i_min:i_max,:))                
+                sink(i_min:i_max,k_max+1,:) = bott_flux(i_min:i_max,:)
                 do ip=1,par_max
-                    dcc(i,k_max,ip) = dcc(i,k_max,ip) + bott_flux(i,ip) / hz(k_max)
+                    dcc(i_min:i_max,k_max,ip) = dcc(i_min:i_max,k_max,ip) + bott_flux(i_min:i_max,ip) / hz(k_max)
                 end do
             end if
-            if (dynamic_w_sed.eq.1) dcc_R(i,:,:) = dcc(i,:,:) !Record biological reaction terms for use in calculate_sed
+
+            call model%finalize_outputs()  ! This ensures that diagnostics unrelated to source routines are computed.
+
+            if (dynamic_w_sed.eq.1) dcc_R(:,:,:) = dcc(:,:,:) !Record biological reaction terms for use in calculate_sed
+
             !Euler time step due to FABM biogeochemistry
-            do k=1,k_max
-                do ip=1,par_max
-                    cc(i,k,ip) = cc(i,k,ip) + dt*dcc(i,k,ip)
-                end do
-            end do
+            cc(:,:,:) = cc(:,:,:) + dt*dcc(:,:,:)
+
             !Reassert Dirichlet BCs
             do ip=1,par_max
-                if (bctype_top(i,ip).gt.0) then
-                    cc(i,i_min,ip) = bc_top(i,ip)
-                end if
-                if (bctype_bottom(i,ip).gt.0) then
-                    cc(i,k_max,ip) = bc_bottom(i,ip)
-                end if
-            end do
-            cc(i,:,:) = max(cc0, cc(i,:,:)) !Impose resilient concentration
+               do i=i_min, i_max
+                   if (bctype_top(i,ip).gt.0) then
+                       cc(i,i_min,ip) = bc_top(i,ip)
+                   end if
+                   if (bctype_bottom(i,ip).gt.0) then
+                       cc(i,k_max,ip) = bc_bottom(i,ip)
+                   end if
+               end do
             enddo
 
+            cc(:,:,:) = max(cc0, cc(:,:,:)) !Impose resilient concentration
+
+       !Compute vertical velocity in water column (sinking/floating) using the FABM.
+       wbio = 0.0_rk
+       do k=1,k_max
+           call model%get_vertical_movement(i_min, i_max, k, wbio(i_min:i_max,k,:)) !Note: wbio is on layer midpoints
+       end do
+       wbio = -wbio !FABM returns NEGATIVE wbio for sinking; sign change here means that wbio is POSITIVE for sinking
+
         !_______Particles sinking_________!
+       dcc = 0.0_rk
         do i=i_min, i_max
             if(model_w_sed.ge.1) then
                 call calculate_sed(i, k_max, par_max, model, cc, wti, sink, &
@@ -1128,6 +1180,7 @@
    !            sink, dcc, hz, dz, k_bbl_sed, julianday, dt, freq_float, is_gas, wbio, cc0)
     !    enddo
        !_______Bubble rising_________!
+        dcc = 0.0_rk
         do i=i_min, i_max
             call calculate_bubble(i, k_max, par_max, model, cc, sink, N_bubbles, &
                 dcc, hz, dz, z, t, k_bbl_sed, julianday, dt, freq_float, &
@@ -1152,7 +1205,6 @@
               wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,12)    
         
        !________Horizontal relaxation_________!
-        if (h_relax.eq.1) then          
             dcc = 0.0_rk
             do i=i_min, i_max
                 do ip=1,par_max
@@ -1160,14 +1212,42 @@
                         do k=1,k_wat_bbl
                         !Calculate tendency dcc (water column only) 
                             dcc(i,k,ip) = (cc_hmix(i,ip,k,julianday)-cc(i,k,ip))/tau_relax
+                        !Central region not relaxed    
+                          if(i.ge.(i_inj-1).and.i.le.(i_inj+1)) then
+                            if(not_relax_centr.ge.1) then 
+                                dcc(i,k,ip) = 0.0_rk
+                            endif    
+                          endif  
                         !Update concentration (water column only)
                             cc(i,k,ip) = cc(i,k,ip) + dt*dcc(i,k,ip)
                         end do
                         cc(i,:,ip) = max(cc0, cc(i,:,ip)) !Impose resilient concentration
                     end if
                 end do
-            enddo
-        endif
+            enddo          
+          
+          
+ !       if (h_relax.eq.1) then          
+ !          dcc = 0.0_rk
+ !          do ip=1,par_max
+ !             if  (hmixtype(i,ip).ge.1) then
+ !                do k=1,k_wat_bbl
+ !                   do i=i_min, i_max
+ !                       !Calculate tendency dcc (water column only) 
+ !                      dcc(i,k,ip) = (cc_hmix(i,ip,k,julianday)-cc(i,k,ip))/tau_relax
+ !   !                   if(not_relax_centr.ge.1) then
+ !    !                     if(i.ge.(i_inj-1).and.i.le.(i_inj+1)) then
+ !     !                       dcc(i,k,ip) = 0.0_rk
+ !      !                   endif
+ !       !               endif
+ !                       !Update concentration (water column only)
+ !                      cc(i,k,ip) = cc(i,k,ip) + dt*dcc(i,k,ip)
+ !                   end do
+ !                end do
+ !!                cc(i,:,ip) = max(cc0, cc(i,:,ip)) !Impose resilient concentration
+ !             end if
+        !   enddo
+        !endif
        
        !________Horizontal turbulence_________!
         if (h_turb.eq.1.and.i_max.gt.1) then
@@ -1238,26 +1318,39 @@
                 end do
         endif
         
-        !________Injection____________________!
-        !            !Source of "acetate" 1292 mmol/sec, should be devided to the volume of the grid cell, i.e. dz(k)*dx(i)*dx(i)
-        if (i_day.gt.start_inj.and.i_day.le.stop_inj.and.i_max.gt.0) then
-            injection_rate = injection_rate_ini  ! source of microplastic
+!________Injection____________________!
+! Source of "substance" in XXXX mmol/sec, should be devided to the volume of the grid cell, i.e. dz(k)*dx(i)*dx(i)
+        if (inj_switch.ne.0)  then
+          if (i_day.ge.start_inj.and.i_day.lt.stop_inj) then
             if (inj_switch.eq.1)  then
                 do ip = 1, par_max
                     if (par_name(ip).eq.get_brom_name("inj_var_name")) exit 
                     inj_num = ip+1           
                 end do 
-            cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num)+dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))      
-
-              !do kj = k_inj-1, k_inj
-              !  do ij= i_inj-2,i_inj+2, 2
-              !    cc(ij,kj,inj_num)=cc(ij,kj,inj_num)+dt*injection_rate/(dx(ij)*dx(ij)*dz(kj))      
-              !  enddo
-              !enddo
+                cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) & 
+                  !       dt/freq_float &  ! w/o  for MgOH2
+                    +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj)) 
+            else
+              if (i_day.ne.start_inj.or.(real(id)/real(idt)).gt.start_inj_part_day) then
+                inj_switch=0 !!!!!! we do it only once
+                !print *, "injection num", inj_num
+                !"cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) & !+86400.0_rk*dt
+                !"         +86400.0_rk*dt/freq_float &
+                !"         *injection_rate/(dx(i_inj)*dy*dz(k_inj))
+                !cc(:,k_inj,inj_num)=cc(:,k_inj,inj_num)+86400.0_rk*dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))
               
-            end if 
-        end if
-        
+                do k=2,k_inj
+!                  injection_rate = dz(k-1)*injection_rate_ini/(z(k_inj)-z(1)) !uniform distr. in the layer 0-k_inj
+                 injection_rate = dz(k_inj-k-1)*injection_rate_ini/(z(k_inj)-z(1))    !"triangle weight"  distr. in the layer 0-k_inj
+
+                 cc(i_inj,k,inj_num)=cc(i_inj,k,inj_num) & 
+                  !       dt/freq_float &  ! w/o  for MgOH2
+                       +  dt*injection_rate/(dx(i_inj)*dy*dz(k)) 
+                enddo
+              end if
+            endif
+          endif  
+        end if     
         
         !________Check for NaNs (stopping if any found)____________________!
         do ip=1,par_max
@@ -1265,7 +1358,7 @@
                 if (any(isnan(cc(i,1:k_max,ip)))) then
                     write(*,*) "Time step within day id = ", id
                     write(*,*) "NaN detected in concentration array, ip = ", ip
-                    write(*,*) "Variable name = ", model%state_variables(ip)%name
+                    write(*,*) "Variable name = ", model%interior_state_variables(ip)%name
                     if (show_nan.eq.1) write(*,*) cc(i,1:k_max,ip)
                     if (show_nan_kztCFL.gt.0) then
                         kztCFL(:,ip) = (kzti(i,2:k_max,ip)*dt/freq_turb)/(dz(1:k_max-1)**2)
@@ -1302,17 +1395,25 @@
            
     fick_per_day = 86400.0_rk * fick
     sink_per_day = 86400.0_rk * sink
-	
+! here we save DIC (pCO2 in uM) air-sea flux  in all the depth of the array air_sea_flux
+    air_sea_flux = 0.0_rk
+	do k=1, k_max
+	  do i=i_min, i_max
+        do ip=1,par_max
+          air_sea_flux(i,k,ip) = 86400.0_rk * surf_flux(i,9)
+        enddo
+      enddo
+    enddo
     if (sediments_units_convert.eq.0) then 
 !		write(*,*) "output_step: ", output_step
 !		write(*,*) "input_step: ", input_step
 !		write(*,*) "id: ", id
         if (ncoutfile_type == 1) then
             call save_netcdf(i_max, k_max, max(1,julianday), cc, t, s, kz, kzti, wti, model, z, hz, Eair, use_Eair, hice, use_hice, &
-            fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, i_day+1, id, idt, output_step, input_step)
+            fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, i_day+1, id, idt, output_step, input_step, air_sea_flux)
         else
             call save_netcdf(i_max, k_max, max(1,julianday), cc, t, s, kz, kzti, wti, model, z, hz, Eair, use_Eair, hice, use_hice, &
-            fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, julianday, id, idt, output_step, input_step)
+            fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, julianday, id, idt, output_step, input_step, air_sea_flux)
         endif
 !    else
 !        !convert into observarional units in the sediments for dissolved (mass/pore water) and solids (mass/mass) with an exception for biota
@@ -1404,6 +1505,7 @@
     deallocate(s)
     deallocate(u_x)
     deallocate(kz)
+    deallocate(air_sea_flux)
     deallocate(kl)
     deallocate(cc_hmix)
     deallocate(kz_bio)
@@ -1438,8 +1540,11 @@
     deallocate(par_name)
     deallocate(Izt)
     deallocate(pressure)
+    deallocate(cell_thickness)
     deallocate(Eair)
     deallocate(hice)
+    deallocate(swradWm2)
+    deallocate(aice)
     deallocate(cc_top)
     deallocate(cc_bottom)
     deallocate(kzti)

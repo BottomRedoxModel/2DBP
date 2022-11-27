@@ -54,8 +54,8 @@
     real(rk)     :: k0r                        !background attenuation
     real(rk)     :: kESS                       !attenuation due to suspended silt
     real(rk)     :: ESS                        !assumed (constant) concentration of suspended silt
-    real(rk)     :: kPhy                       !attenuation due to phytoplankton
-    real(rk)     :: kPOML                       !attenuation due to particulate organic matter
+    real(rk)     :: kaPhy                       !attenuation due to phytoplankton
+    real(rk)     :: kPOML                      !attenuation due to particulate organic matter
     real(rk)     :: kHet                       !attenuation due to zooplankton
     real(rk)     :: kDON                       !attenuation due to dissolved organic matter
     real(rk)     :: kB                         !attenuation due to bacteria
@@ -84,7 +84,7 @@
         k0r = get_brom_par("k0r")
         kESS = get_brom_par("kESS")
         ESS = get_brom_par("ESS")
-        kPhy = get_brom_par("kPhy")
+        kaPhy = get_brom_par("kaPhy")
         kPOML = get_brom_par("kPOML")
 
     if (light_model.eq.1) then
@@ -117,13 +117,13 @@
             !If in the sediments set PAR(z) to zero, otherwise calculate layer-average PAR(z)
             if (k.le.k_bbl_sed) then !This is simplest (and safest) criterion
                 if (light_model.eq.0) then !Simple model from ersem/light.f90
-!                    xk = k0r + kESS*ESS + kPhy*cc(i,k,id_Phy) + kPOML*cc(i,k,id_POML)
-                    xk = k0r + kESS*ESS + kPhy*cc(i,k,id_Phy) + kPOML*(cc(i,k,id_POML)+cc(i,k,id_POMR))
+!                    xk = k0r + kESS*ESS + kaPhy*cc(i,k,id_Phy) + kPOML*cc(i,k,id_POML)
+                    xk = k0r + kESS*ESS + kaPhy*cc(i,k,id_Phy) + kPOML*(cc(i,k,id_POML)+cc(i,k,id_POMR))
                     !Attenuation over layer k [m^-1] due to background, suspended sediment, phytoplankton, and POML
                 endif
 
                 if (light_model.eq.1) then !Extended model accounting for other particulate species modelled in BROM
-                    xk = k0r + kESS*ESS + kPhy*cc(i,k,id_Phy) + kPOML*(cc(i,k,id_POML)+cc(i,k,id_POMR)) &
+                    xk = k0r + kESS*ESS + kaPhy*cc(i,k,id_Phy) + kPOML*(cc(i,k,id_POML)+cc(i,k,id_POMR)) &
                         + kHet*cc(i,k,id_Het) + kDON*(cc(i,k,id_DOML)+cc(i,k,id_DOMR)) &
                         + kB*(cc(i,k,id_Baae)+cc(i,k,id_Baan)+cc(i,k,id_Bhae)+cc(i,k,id_Bhan))
                     do ip=1,par_max
@@ -136,7 +136,7 @@
                 end if
                 
                 if (light_model.eq.2) then   
-                    xk = k0r + kESS*ESS + kPhy*cc(i,k,id_Phy) + kPOML*cc(i,k,id_POM)  !case OxyDep                    
+                    xk = k0r + kESS*ESS + kaPhy*cc(i,k,id_Phy) + kPOML*cc(i,k,id_POM)  !case OxyDep                    
                 end if
                 
                 xtnc = xk*hz(k)     !Extinction over layer k with thickness hz(k)
@@ -169,7 +169,7 @@
 
     !Calculate vertical diffusion in the water column and sediments
 
-    use fabm , only: type_model, fabm_do_surface !, fabm_do_bottom !, fabm_do_bottom_rhs
+    use fabm , only: type_fabm_model
 
     implicit none
 
@@ -189,10 +189,10 @@
 
     !Output variables
     real(rk), dimension(:,:), intent(out)       :: surf_flux, bott_flux, bott_source
-    real(rk), dimension(:,:,:), intent(out)     :: kzti, fick, dcc    !Note: fick and dcc have units [mmol/m2/s] and [mmol/m3/s] respectively
+    real(rk), dimension(:,:,:), intent(inout)     :: kzti, fick, dcc    !Note: fick and dcc have units [mmol/m2/s] and [mmol/m3/s] respectively
 
     !Input/output variables
-    type (type_model), intent(inout)            :: model
+    class (type_fabm_model), pointer :: model
     real(rk), dimension(:,:,:), intent(inout)   :: cc
 
     !Local variables
@@ -204,14 +204,12 @@
 
 
     dtt = dt/freq_turb !Turbulence model time step [seconds]
-    dcc = 0.0_rk
-
 
     do idf=1,freq_turb !Do freq_turb time steps of size dt/freq_turb to perform turbulent mixing
 
         surf_flux = 0.0_rk
-        if (surf_flux_with_diff.eq.1) call fabm_do_surface(model, i, i, surf_flux(i:i,:))
-        !Note: We MUST pass the range "i:i" to fabm_do_surface -- a single value "i" will produce compiler error!
+        if (surf_flux_with_diff.eq.1) call model%get_surface_sources(i, i, surf_flux(i:i,:))
+        !Note: We MUST pass the range "i:i" to model%get_surface_sources( -- a single value "i" will produce compiler error!
         !Note: surf_flux has units [mass/m2/s] and is positive into the ocean (air->sea), see e.g. brom_carb.F90 and brom_bio.F90
         !!Calculate total vertical diffusivity [m2/s] and diffusive Courant number
         if(k_bbl_sed.ne.k_max) then
@@ -269,7 +267,7 @@
                 bott_source = 0.0_rk                
 
 
-!                call fabm_do_bottom(model, i, i, bott_flux(i:i,:),bott_source(i:i,:))
+!                model%get_bottom_sources(i, i, bott_flux(i:i,:),bott_source(i:i,:))
                 fick(i,k_max+1,:) = bott_flux(i,:)
             else
                 fick(i,k_max+1,:) = 0.0_rk
@@ -456,7 +454,7 @@
 
     !Calculates vertical advection (sedimentation) in the water column and sediments
 
-    use fabm, only: type_model, fabm_get_vertical_movement, fabm_do_bottom 
+    use fabm, only: type_fabm_model
 
     implicit none
 
@@ -471,12 +469,13 @@
     real(rk), intent(in)                        :: dt, K_O2s, dphidz_SWI, cc0
 
     !Output variables
-    real(rk), dimension(:,:,:), intent(out)     :: wbio, wti
-    real(rk), dimension(:,:,:), intent(out)     :: sink, dcc
+    real(rk), dimension(:,:,:), intent(in)      :: wbio
+    real(rk), dimension(:,:,:), intent(inout)   :: wti
+    real(rk), dimension(:,:,:), intent(inout)   :: sink, dcc
     real(rk), dimension(:,:), intent(out)       :: bott_flux, bott_source
  
     !Input/output variables
-    type (type_model), intent(inout)            :: model
+    class (type_fabm_model), pointer :: model
     real(rk), dimension(:,:,:), intent(inout)   :: cc
 
     !Local variables
@@ -486,22 +485,12 @@
 
 
     dtt = dt/freq_sed !Sedimentation model time step [seconds]
-    dcc = 0.0_rk
 !    sink = 0.0_rk
     w_1 = 0.0_rk
     u_1 = 0.0_rk
     w_1c = 0.0_rk
     u_1c = 0.0_rk
     sink(i,:,:) = 0.0_rk
-
-    !Compute vertical velocity in water column (sinking/floating) using the FABM.
-    wbio = 0.0_rk
-    do k=1,k_max
-!        i = real(i)
-        call fabm_get_vertical_movement(model, i, i, k, wbio(i:i,k,:))  !Note: wbio is on layer midpoints
-    end do
-    wbio = -1.0_rk * wbio !FABM returns NEGATIVE wbio for sinking; sign change here means that wbio is POSITIVE for sinking
-
 
     !Compute vertical velocity components due to modelled (reactive) particles, if required
     !
@@ -640,7 +629,7 @@
         !cc bottom layer
         bott_flux = 0.0_rk
         bott_source = 0.0_rk       
-        call fabm_do_bottom(model, i, i, bott_flux(i:i,:),bott_source(i:i,:))
+        call model%get_bottom_sources(i, i, bott_flux(i:i,:),bott_source(i:i,:))
         do ip=1,par_max
             if (is_solid(ip).eq.1) then            
                 dcc(i,k_max,ip) = dcc(i,k_max,ip) + bott_flux(i,ip) / hz(k_max)
@@ -675,7 +664,7 @@
 
     !Calculates vertical advection (sedimentation) in the water column and sediments
 
-    use fabm, only: type_model, fabm_get_vertical_movement, fabm_do_bottom 
+    use fabm, only: type_fabm_model
 
     implicit none
 
@@ -691,12 +680,13 @@
     real(rk), intent(in)                        :: fresh_PM_poros, w_binf, bu_co
 
     !Output variables
-    real(rk), dimension(:,:,:), intent(out)     :: wbio, wti
-    real(rk), dimension(:,:,:), intent(out)     :: sink, dcc
+    real(rk), dimension(:,:,:), intent(in)      :: wbio
+    real(rk), dimension(:,:,:), intent(inout)   :: wti
+    real(rk), dimension(:,:,:), intent(inout)   :: sink, dcc
     real(rk), dimension(:,:), intent(out)       :: bott_flux, bott_source
  
     !Input/output variables
-    type (type_model), intent(inout)            :: model
+    class (type_fabm_model), pointer :: model
     real(rk), dimension(:,:,:), intent(inout)   :: cc, dVV
 
     !Local variables
@@ -706,22 +696,12 @@
 
 
     dtt = dt/freq_sed !Sedimentation model time step [seconds]
-    dcc = 0.0_rk
 !    sink = 0.0_rk
     w_1 = 0.0_rk
     u_1 = 0.0_rk
     w_1c = 0.0_rk
     u_1c = 0.0_rk
     sink(i,:,:) = 0.0_rk
-
-    !Compute vertical velocity in water column (sinking/floating) using the FABM.
-    wbio = 0.0_rk
-    do k=1,k_max
-!        i = real(i)
-        call fabm_get_vertical_movement(model, i, i, k, wbio(i:i,k,:))  !Note: wbio is on layer midpoints
-    end do
-    wbio = -1.0_rk*wbio !FABM returns NEGATIVE wbio for sinking; sign change
-    ! here means that wbio is POSITIVE for sinking; we also make zero wbio for bubbles floating
 
     ! wti() at water column layer midpoints including Air-sea interface (unused) 
     !    and not including SWI:  (as wbio in FABM) 
@@ -788,8 +768,7 @@
             dcc(i,k,:) = (sink(i,k-1,:)-sink(i,k,:)) / hz(k) !-1)
         end do
             dcc(i,1,:) = - sink(i,1,:)/ hz(1)
-!        sink(i,k_max,:)=sink(i,k_max-1,:)
-
+            dcc(i,k_max,:) = 0.0_rk
         !!Time integration
         do ip=1,par_max
             if (bctype_top(i,ip).gt.0) then
@@ -805,10 +784,11 @@
         !cc bottom layer
         bott_flux = 0.0_rk
         bott_source = 0.0_rk       
-        call fabm_do_bottom(model, i, i, bott_flux(i:i,:),bott_source(i:i,:))
+        call model%get_bottom_sources(i, i, bott_flux(i:i,:),bott_source(i:i,:))
         do ip=1,par_max
-            if (is_solid(ip).eq.1) then            
+            if (is_solid(ip).eq.1) then   
                 dcc(i,k_max,ip) = dcc(i,k_max,ip) + bott_flux(i,ip) / hz(k_max)
+ !               dcc(i,k_max,ip) = dcc(i,k_max-1,ip) + bott_flux(i,ip) / hz(k_max) ! with  Matvey
                 sink(i,k_max+1,:) = bott_flux(i,:)
             endif
         end do
@@ -835,7 +815,7 @@
 
     !Calculates floating of bubbles in the water column and sediments
 
-    use fabm, only: type_model, fabm_get_vertical_movement, fabm_do_bottom 
+    use fabm, only: type_fabm_model
 
     implicit none
 
@@ -848,12 +828,12 @@
     real(rk), intent(in)                        :: dt, cc0, N_bubbles
 
     !Output variables
-    real(rk), dimension(:,:,:), intent(out)     :: wbio
+    real(rk), dimension(:,:,:), intent(in)      :: wbio
     real(rk), dimension(:,:,:), intent(out)     :: sink, dcc
  !   real(rk), dimension(:,:), intent(out)       :: bott_flux, bott_source
  
     !Input/output variables
-    type (type_model), intent(inout)            :: model
+    class (type_fabm_model), pointer :: model
     real(rk), dimension(:,:,:), intent(inout)   :: cc
 
     !Local variables
@@ -861,14 +841,8 @@
     integer  :: i, k, ip, idf
 
     dtt = dt/freq_float !Sedimentation model time step [seconds]
-    dcc = 0.0_rk
 !    sink(i,:,:) = 0.0_rk
-    !Compute vertical velocity in water column (sinking/floating) using the FABM.
-    wbio = 0.0_rk
-    do k=1,k_max
-        call fabm_get_vertical_movement(model, i, i, k, wbio(i:i,k,:))  !Note: wbio is on layer midpoints
-    end do
-    wbio = -1.0_rk * wbio !FABM returns NEGATIVE wbio for sinking; sign change here means that wbio is POSITIVE for sinking
+
     ! Perform rise advective flux calculation and cc update
     ! This uses a simple first order upwind differencing scheme (FUDM)
     ! It uses the fluxes sink in a consistent manner and therefore conserves mass
