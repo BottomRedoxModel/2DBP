@@ -61,7 +61,7 @@
     character :: hmix_file
 
     !Forcings to be provided to FABM: These must have the POINTER attribute
-    real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice, aice, swradWm2
+    real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice, aice, swradWm2, swradWm2_1d, hice_1d, aice_1d
     real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure, depth, cell_thickness
     real(rk), pointer, dimension(:,:,:)        :: t, s, u_x
     real(rk), pointer, dimension(:,:,:)        :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio, air_sea_flux ! add the description cc - all params, dcc - volumes of solids
@@ -236,6 +236,9 @@
     allocate(par_name(par_max))
     allocate(pco2atm(i_max))
     allocate(windspeed(i_max))
+    allocate(swradWm2_1d(i_max))
+    allocate(aice_1d(i_max))
+    allocate(hice_1d(i_max))
     allocate(cc_top(i_max,par_max,days_in_yr))
     allocate(cc_bottom(i_max,par_max,days_in_yr))
     allocate(is_solid(par_max))
@@ -251,7 +254,9 @@
     !Make the named parameter indices id_O2 etc.
     call get_ids(par_name)
 
-
+   if (id_O2.lt.1) id_O2=id_oxy       ! in BROM we have O2 and in OxyDep we have OXY
+   if (id_POML.lt.1) id_POML=id_POM   ! in BROM we have POML and in OxyDep we have POM
+    
     !Get boudary condition parameters from brom.yaml:
     !bctype = 0, 1, 2, 3 for no flux (default), Dirichlet constant, Dirichlet sinusoid, and Dirichlet netcdf input respectively
     do ip=1,par_max
@@ -483,11 +488,11 @@
     call model%link_interior_data(fabm_standard_variables%cell_thickness, cell_thickness)
     call model%link_horizontal_data(fabm_standard_variables%wind_speed, windspeed)
     call model%link_horizontal_data(fabm_standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2atm)
-    call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(1:1))
+    call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2_1d)
     
     if (use_hice.eq.1) then
-        call model%link_horizontal_data(type_horizontal_standard_variable(name='hice'), hice(1:1))
-        call model%link_horizontal_data(type_horizontal_standard_variable(name='aice'), aice(1:1))
+        call model%link_horizontal_data(type_horizontal_standard_variable(name='hice'), hice_1d)
+        call model%link_horizontal_data(type_horizontal_standard_variable(name='aice'), aice_1d)
     endif
     
    call model%link_interior_data(volume_of_cell, vv(:,:,1))
@@ -867,6 +872,9 @@
     pco2_atm   = get_brom_par("pco2_atm")      ! CO2 partical pressure [ppm]
     pco2atm(:) = pco2_atm                      ! Same pCO2 values for all the surface gridpoints
     windspeed(:) = wind_speed                  ! Same wind speed values to all the surface gridpoints
+    swradWm2_1d(:) = swradWm2(1)
+    aice_1d(:) = aice(1)
+    hice_1d(:) = hice(1)
 
     end subroutine init_brom_transport
 !=======================================================================================================================
@@ -1043,15 +1051,14 @@
       ! Reload changes in t, s, light, ice (needed for FABM/biology)
         call model%link_interior_data(fabm_standard_variables%temperature, t(:,:,istep))
         call model%link_interior_data(fabm_standard_variables%practical_salinity, s(:,:,istep))
-       
+
+        swradWm2_1d(:) = swradWm2(istep)
         if (use_hice.eq.1) then
-            call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(istep:istep))
-            call model%link_horizontal_data(type_horizontal_standard_variable(name='hice'), hice(istep:istep))
-            call model%link_horizontal_data(type_horizontal_standard_variable(name='aice'),aice(istep:istep))
+            hice_1d(:) = hice(istep)
+            aice_1d(:) = aice(istep)
         else
    !         decl = 23.5_rk*sin(2.0_rk*pi*(real(julianday,rk)-81.0_rk)/365.0_rk) !Solar declination in degrees
    !         swradWm2(istep:istep) = max(0.0_rk, Io*cos((lat_light-decl)*pi/180.0_rk))
-            call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2(istep:istep))
         endif
         
       endif
@@ -1202,7 +1209,7 @@
               i_day, " model_year:", model_year, "; julianday:", julianday, &
               "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
               wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
-              wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,12)    
+              wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,id_POML)    
         
        !________Horizontal relaxation_________!
             dcc = 0.0_rk

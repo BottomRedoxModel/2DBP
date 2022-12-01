@@ -288,7 +288,7 @@
         end if
         if (yeari.eq.year.and.istart.eq.-1) istart = i    !istart = first index where (yeari==year)
     end do
-    iend=istart+steps_in_yr
+    iend=istart+steps_in_yr-1
     ni = iend-istart+1
       if (ni.lt.steps_in_yr) then
         write(*,*) "Could not find steps_in_yr time inputs starting from 1st day of selected year (ni = ", ni, ", stopping"
@@ -320,16 +320,27 @@
     end do
     !Set the water temperature (t_w), salinity (s_w), vertical diffusivity (kz_w),
     !and (if required) the surface irradiance (Eair) and ice thickness (hice)
-    do istep=1,steps_in_yr !Loop over hours
-        t_w(i_max,1:k_wat_bbl,istep) = t_temp(istart+istep+1,1:k_wat_bbl)
-        s_w(i_max,1:k_wat_bbl,istep) = s_temp(istart+istep+1,1:k_wat_bbl)
-        Kz_w(i_max,1:k_wat_bbl,istep) = kz_temp(istart+istep+1,1:k_wat_bbl)
-        u_x_w(i_max,1:k_wat_bbl,istep) = u_temp(istart+istep+1,1:k_wat_bbl)
-!        u_x_w(i_max,1:k_wat_bbl,istep) = v_temp(istart+istep+1,1:k_wat_bbl)
-        if (use_hice.eq.1) hice(istep) = hice_temp(istart+istep+1)
-        if (use_hice.eq.1) swradWm2(istep) = swradWm2_temp(istart+istep+1)
-        if (use_hice.eq.1) aice(istep) = aice_temp(istart+istep+1)
-        if (use_Eair.eq.1) Eair(istep) = Eair_temp(istart+istep+1)
+    do istep=1,steps_in_yr-1 !Loop over hours
+        t_w(i_max,1:k_wat_bbl,istep) = t_temp(istart+istep,1:k_wat_bbl)
+        s_w(i_max,1:k_wat_bbl,istep) = s_temp(istart+istep,1:k_wat_bbl)
+        Kz_w(i_max,1:k_wat_bbl,istep) = kz_temp(istart+istep,1:k_wat_bbl)
+        u_x_w(i_max,1:k_wat_bbl,istep) = u_temp(istart+istep,1:k_wat_bbl)
+!        u_x_w(i_max,1:k_wat_bbl,istep) = v_temp(istart+istep,1:k_wat_bbl)
+        if (use_hice.eq.1) hice(istep) = hice_temp(istart+istep)
+        if (use_hice.eq.1) swradWm2(istep) = swradWm2_temp(istart+istep)
+        if (use_hice.eq.1) aice(istep) = aice_temp(istart+istep)
+        if (use_Eair.eq.1) Eair(istep) = Eair_temp(istart+istep)
+
+!        t_w(i_max,1:k_wat_bbl,istep) = t_temp(istart+istep+1,1:k_wat_bbl)
+!        s_w(i_max,1:k_wat_bbl,istep) = s_temp(istart+istep+1,1:k_wat_bbl)
+!        Kz_w(i_max,1:k_wat_bbl,istep) = kz_temp(istart+istep+1,1:k_wat_bbl)
+!        u_x_w(i_max,1:k_wat_bbl,istep) = u_temp(istart+istep+1,1:k_wat_bbl)
+!!        u_x_w(i_max,1:k_wat_bbl,istep) = v_temp(istart+istep+1,1:k_wat_bbl)
+!        if (use_hice.eq.1) hice(istep) = hice_temp(istart+istep+1)
+!        if (use_hice.eq.1) swradWm2(istep) = swradWm2_temp(istart+istep+1)
+!        if (use_hice.eq.1) aice(istep) = aice_temp(istart+istep+1)
+!        if (use_Eair.eq.1) Eair(istep) = Eair_temp(istart+istep+1)        
+        
     enddo
 
     if (use_gargett.eq.1) then
@@ -443,7 +454,7 @@
     allocate(parameter_sink_id(size(model%interior_state_variables)))
     do ip=1,size(model%interior_state_variables)
         ilast = index(model%interior_state_variables(ip)%path,'/',.true.)
-        call check_err(nf90_def_var(nc_id, model%interior_state_variables(ip)%path(ilast+1:), NF90_REAL, dim_ids, parameter_id(ip)))
+        call check_err(nf90_def_var(nc_id, model%interior_state_variables(ip)%path(ilast+1:), NF90_REAL, dim_ids, parameter_id(ip)))  ! was ilast+1:
         call check_err(nf90_def_var(nc_id, 'fick:'//model%interior_state_variables(ip)%path(ilast+1:), NF90_REAL, dim_ids2, parameter_fick_id(ip)))
         call check_err(nf90_def_var(nc_id, 'sink:'//model%interior_state_variables(ip)%path(ilast+1:), NF90_REAL, dim_ids2, parameter_sink_id(ip)))
         call check_err(set_attributes(ncid=nc_id, id=parameter_id(ip), units=model%interior_state_variables(ip)%units, &
