@@ -239,16 +239,19 @@
             end do
 
             !Sediment-water interface (SWI)
+            
             k = k_bbl_sed+1
             if (bioturb_across_SWI.eq.0) fick(i,k,:) = -1.0_rk * pF2(i,k,:) * 100000.0_rk*kzti(i,k,:) * (pF1(i,k,:)*cc(i,k,:)-cc(i,k-1,:)) / dz(k-1)/100000.0_rk
             !If not including bioturbation across the SWI, kzti will be zero for particles so we do not need to worry
             !about the Fickian gradient. Here fick will only represent molecular diffusion.
+         if (k_bbl_sed.lt.k_max) then            
             if (bioturb_across_SWI.eq.1) then
                 fick(i,k,:) = -1.0_rk * pF2(i,k,:) * 100000.0_rk*kz_mol(i,k,:) * (pF1(i,k,:)*cc(i,k,:)-cc(i,k-1,:)) / dz(k-1)/100000.0_rk
                 !Molecular part is only applied to solutes (kz_mol = 0 for particulates); this mixes [mass/unit volume water] (intraphase mixing)
                 fick(i,k,:) = fick(i,k,:) - kz_bio(i,k) * O2stat * (cc(i,k,:)-cc(i,k-1,:)) / dz(k-1)
                 !Bioturbation part applies to both and mixes the concentrations in [mass/unit total volume] either side of SWI (interphase mixing)
             end if
+         endif   
 
             !Sediment layer interfaces, not including the SWI
             do k=k_bbl_sed+2,k_max
@@ -403,6 +406,7 @@
                     pF(1:k_max) = pF1(i,k_max:1:-1,ip)  !pF1 = 1/phi for solutes, 1/(1-phi) for particulates, on layer midpoints
                                                         !Note: pF(0) is expected by diff_center but is not used
                     Y(1:k_max) = cc(i,k_max:1:-1,ip)    !Note: Y(0) is expected by diff_center but is not used
+                if (k_bbl_sed.lt.k_max) then
                     if (is_solid(ip).eq.0) then
                         !fick_SWI = -phi_0*Km/dz*(C_1/phi_1 - C_-1) - Kb/dz*(C_1 - C_-1)   [intraphase molecular + interphase bioturb]
                         !         = -phi_0*(Km+Kb)/dz * (p_1*C_1 - p_-1*C_-1)
@@ -422,6 +426,7 @@
                         pFSWIup = 1.0_rk / (1.0_rk - pF2(i,k_bbl_sed+1,ip))
                         pFSWIdw = pFSWIup
                     end if
+                endif
 
                     call diff_center2(k_max,dtt,cnpar,posconc,h,DiffBcup,DiffBcdw,          &
                                 Diffccup,Diffccdw,nuY,Lsour,Qsour,Taur,Yobs,pF,             &

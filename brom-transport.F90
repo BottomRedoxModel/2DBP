@@ -61,10 +61,11 @@
     character :: hmix_file
 
     !Forcings to be provided to FABM: These must have the POINTER attribute
-    real(rk), pointer, dimension(:)            :: pco2atm, windspeed, hice, aice, swradWm2, swradWm2_1d, hice_1d, aice_1d
+    real(rk), pointer, dimension(:)            :: pco2_atm_1d, wind_speed_1d, hice, aice, swradWm2, swradWm2_1d, hice_1d, aice_1d
     real(rk), pointer, dimension(:,:)          :: surf_flux, bott_flux, bott_source, Izt, pressure, depth, cell_thickness
     real(rk), pointer, dimension(:,:,:)        :: t, s, u_x
     real(rk), pointer, dimension(:,:,:)        :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio, air_sea_flux ! add the description cc - all params, dcc - volumes of solids
+    real(rk), pointer, dimension(:,:)        :: wbio_2d
     ! vv -> 2d
 
     !Surface and bottom forcings, used within brom-transport only
@@ -105,6 +106,8 @@
     
     !Constant forcings that can be read as parameters from brom.yaml
     real(rk) :: wind_speed, pco2_atm, mu0_musw, dphidz_SWI , dx_min, dx_max, dy ! dx_adv
+    
+    real(rk)     :: lat_light, Io   !Variables used to calculate surface irradiance from latitude
     real(rk), allocatable, dimension(:)        :: rho
 
     !Counters
@@ -169,7 +172,10 @@
     not_relax_centr =  get_brom_par("not_relax_centr")
     h_turb =  get_brom_par("h_turb")
 !    dx_adv = get_brom_par("dx_adv")
-	
+    ! light connected parameters (if not available in the forcing file)
+    lat_light = get_brom_par("lat_light")
+    Io = get_brom_par("Io")                    !W m-2 maximum surface downwelling irradiance at latitudes <= 23.5N,S	
+    
 	! vertical grid params
     
     !!Get diffusivity parameters from brom.yaml
@@ -234,8 +240,8 @@
     allocate(bcpar_top(i_max,par_max,3))
     allocate(bcpar_bottom(i_max,par_max,3))
     allocate(par_name(par_max))
-    allocate(pco2atm(i_max))
-    allocate(windspeed(i_max))
+    allocate(pco2_atm_1d(i_max))
+    allocate(wind_speed_1d(i_max))
     allocate(swradWm2_1d(i_max))
     allocate(aice_1d(i_max))
     allocate(hice_1d(i_max))
@@ -378,7 +384,8 @@
     allocate(dcc_R(i_max,k_max,par_max))
     allocate(fick(i_max,k_max+1,par_max))
     allocate(fick_per_day(i_max,k_max+1,par_max))
-    allocate(wbio(i_max,k_max,par_max))    !vertical velocity (m/s, negative for sinking)
+    allocate(wbio(i_max,k_max,par_max))    !sinking vertical velocity (m/s, negative for sinking)
+    allocate(wbio_2d(k_max,par_max))    !sinking vertical velocity (m/s, negative for sinking)
     allocate(sink(i_max,k_max+1,par_max))  !sinking flux (mmol/m2/s, positive downward)
     allocate(sink_per_day(i_max,k_max+1,par_max))
     allocate(vv(i_max,k_max,1))
@@ -462,7 +469,7 @@
     ! call model%set_bottom_index(k_max)
 
     !Initial volumes of layers:
-    vv(i:i_max,1:k_max,1) = 1.0_rk
+    vv(1:i_max,1:k_max,1) = 1.0_rk
 
     !Make they (full) pressure variable to pass to FABM
     !This is used by brom_eqconst.F90 to compute equilibrium constants for pH calculations
@@ -486,8 +493,8 @@
     call model%link_interior_data(fabm_standard_variables%pressure, pressure)                              !dbar
     call model%link_interior_data(fabm_standard_variables%depth, depth)                            !dbar
     call model%link_interior_data(fabm_standard_variables%cell_thickness, cell_thickness)
-    call model%link_horizontal_data(fabm_standard_variables%wind_speed, windspeed)
-    call model%link_horizontal_data(fabm_standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2atm)
+    call model%link_horizontal_data(fabm_standard_variables%wind_speed, wind_speed_1d)
+    call model%link_horizontal_data(fabm_standard_variables%mole_fraction_of_carbon_dioxide_in_air, pco2_atm_1d)
     call model%link_horizontal_data(fabm_standard_variables%surface_downwelling_shortwave_flux, swradWm2_1d)
     
     if (use_hice.eq.1) then
@@ -507,8 +514,6 @@
         call model%initialize_interior_state(1, i_max, k)
     end do
     
-           vv=1._rk
-
     !Read initial values from ascii file if req'd
     if (port_initial_state.eq.1) call porting_initial_state_variables(trim(icfile_name), year, &
                                                 i_day, i_max, k_max, par_max, par_name, cc, vv)
@@ -538,10 +543,11 @@
     call init_netcdf(trim(ncoutfile_name), i_max, k_max, model, use_Eair, use_hice, year)
 
     !Establish which variables will be treated as solid phase in the sediments, based on the biological velocity (sinking/floating) from FABM.
+
     wbio = 0.0_rk
-    call model%get_vertical_movement(i_max, i_max, k_wat_bbl, wbio(i_max:i_max,k_wat_bbl,:))
-    do i=i_min,i_max-1
-        wbio(i,:,:)=wbio(i_max,:,:)
+
+    do k=1,k_wat_bbl
+            call model%get_vertical_movement(i_min, i_max, k, wbio(i_min:i_max,k,:)) 
     enddo
     wbio = -1.0_rk * wbio !FABM returns NEGATIVE wbio for sinking; sign change here means that wbio is POSITIVE for sinking
     is_solid = 0
@@ -556,7 +562,7 @@
 !            write(*,*) trim(par_name(ip))
             if (ip_par.eq.0) ip_par = ip !Set ip_par = index of first particulate variable
         elseif (wbio(i,k_wat_bbl,ip).lt.0.0_rk) then
-            is_gas(ip) = 1 !Any variables that floats (wbio>1) in the bottom cell of the water column will become "solid" in the sediments
+            is_gas(ip) = 1 !Any variables that floats (wbio>1) 
 !            write(*,*) trim(par_name(ip))           
         else
             if (ip_sol.eq.0) ip_sol = ip !Set ip_par = index of first solute variable
@@ -581,10 +587,16 @@
     
     !!Set useful parameters for calculations
     !Useful depths
-    z_wat_bbl = z(k_wat_bbl+1) - 0.5_rk*hz(k_wat_bbl+1) !Depth of water-BBL interface
-    z_bbl_sed = z(k_bbl_sed+1) - 0.5_rk*hz(k_bbl_sed+1) !Depth of BBL-sediment interface (SWI)
+    
+    if (k_points_below_water.gt.0) then
+        z_wat_bbl = z(k_wat_bbl+1) - 0.5_rk*hz(k_wat_bbl+1) !Depth of water-BBL interface
+        z_bbl_sed = z(k_bbl_sed+1) - 0.5_rk*hz(k_bbl_sed+1) !Depth of BBL-sediment interface (SWI)
+    else
+        z_wat_bbl = z(k_wat_bbl)
+        z_bbl_sed = z(k_bbl_sed)
+    endif    
     z1(1:k_max) = z(:)-0.5_rk*hz(:)         !Depth of layer interfaces
-    z1(k_max+1) = z(k_max)+0.5_rk*hz(k_max)
+    !z1(k_max+1) = z(k_max)+0.5_rk*hz(k_max)
     z_s1 = z1-z_bbl_sed                     !Depth of interfaces wrt SWI
 
     !Useful index vectors
@@ -870,8 +882,8 @@
     !Set constant forcings
     wind_speed = get_brom_par("wind_speed")    ! 10m wind speed [m s-1]
     pco2_atm   = get_brom_par("pco2_atm")      ! CO2 partical pressure [ppm]
-    pco2atm(:) = pco2_atm                      ! Same pCO2 values for all the surface gridpoints
-    windspeed(:) = wind_speed                  ! Same wind speed values to all the surface gridpoints
+    pco2_atm_1d(:) = pco2_atm                      ! Same pCO2 values for all the surface gridpoints
+    wind_speed_1d(:) = wind_speed                  ! Same wind speed values to all the surface gridpoints
     swradWm2_1d(:) = swradWm2(1)
     aice_1d(:) = aice(1)
     hice_1d(:) = hice(1)
@@ -998,7 +1010,11 @@
         julianday = i_day - int(i_day/days_in_yr)*days_in_yr + 1    !"julianday" (1,2,...,days_in_yr)
         if (julianday==1) model_year = model_year + 1
 
+    if (k_points_below_water.gt.0) then
         write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000.
+    else    
+        write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000.
+    endif
         !If including ice using horizontal coordinate, set ice volume in top cell of ice column
             !vv = 0.0_rk
             !if (i_max.eq.2) then
@@ -1052,17 +1068,22 @@
         call model%link_interior_data(fabm_standard_variables%temperature, t(:,:,istep))
         call model%link_interior_data(fabm_standard_variables%practical_salinity, s(:,:,istep))
 
-        swradWm2_1d(:) = swradWm2(istep)
+      !  if (swradWm2(istep).gt.0.0_rk) then
+        if (use_Eair.gt.0.0_rk) then
+            swradWm2_1d(:) = swradWm2(istep)
+        else
+        !    decl = 23.5_rk*sin(2.0_rk*pi*(real(julianday,rk)-81.0_rk)/365.0_rk) !Solar declination in degrees
+            swradWm2_1d(:) = max(0.0_rk, Io*cos((lat_light &
+                    -23.5_rk*sin(2.0_rk*pi*(real(julianday,rk)-81.0_rk)/365.0_rk) & !Solar declination in degrees
+                    )*pi/180.0_rk))
+        endif        
+        
         if (use_hice.eq.1) then
             hice_1d(:) = hice(istep)
             aice_1d(:) = aice(istep)
-        else
-   !         decl = 23.5_rk*sin(2.0_rk*pi*(real(julianday,rk)-81.0_rk)/365.0_rk) !Solar declination in degrees
-   !         swradWm2(istep:istep) = max(0.0_rk, Io*cos((lat_light-decl)*pi/180.0_rk))
-        endif
-        
+        endif     
       endif
-      
+        
 	  i_count_pr=0
 
         !_______vertical diffusion________!
@@ -1111,7 +1132,7 @@
             call model%prepare_inputs()  ! This ensures that all variables that the source routines depend on are computed. 
             dcc = 0.0_rk
             do k=1,k_max
-               call model%get_interior_sources(i_min, i_max, k, dcc(i_min:i_max,k,:)) 
+               call model%get_interior_sources (i_min, i_max, k, dcc(i_min:i_max,k,:)) 
             end do
 
             !Add surface and bottom fluxes if treated here
@@ -1157,9 +1178,12 @@
 
        !Compute vertical velocity in water column (sinking/floating) using the FABM.
        wbio = 0.0_rk
+       !!!do k=1,k_max
+       !!!    call model%get_vertical_movement(i_min, i_max, k, wbio(i_min:i_max,k,:)) !Note: wbio is on layer midpoints
+       !!!end do
        do k=1,k_max
            call model%get_vertical_movement(i_min, i_max, k, wbio(i_min:i_max,k,:)) !Note: wbio is on layer midpoints
-       end do
+       end do       
        wbio = -wbio !FABM returns NEGATIVE wbio for sinking; sign change here means that wbio is POSITIVE for sinking
 
         !_______Particles sinking_________!
@@ -1205,11 +1229,14 @@
            end do
         enddo  
         i = 1
+        
+    if (k_points_below_water.gt.0) then
           if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, e9.3, a, e9.3, a, e9.3)') " i_day:", &
               i_day, " model_year:", model_year, "; julianday:", julianday, &
               "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
               wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
               wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,id_POML)    
+    endif          
         
        !________Horizontal relaxation_________!
             dcc = 0.0_rk
