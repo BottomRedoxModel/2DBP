@@ -42,10 +42,10 @@
     !Input variables
     character(len=attribute_length),dimension(:)  :: par_name
 
-!	id_Phy = find_index(par_name, 'B_OXYDEP_Phy') 
-!	id_Het = find_index(par_name, 'B_OXYDEP_Het')       
-     id_Phy = find_index(par_name, 'B_BIO_Phy')        
-     id_Het = find_index(par_name, 'B_BIO_Het') 
+	id_Phy = find_index(par_name, 'B_OXYDEP_Phy') 
+	id_Het = find_index(par_name, 'B_OXYDEP_Het')       
+!    id_Phy = find_index(par_name, 'B_BIO_Phy')        
+!     id_Het = find_index(par_name, 'B_BIO_Het') 
 	id_POM = find_index(par_name, 'B_OXYDEP_POM')
 	id_DOM = find_index(par_name, 'B_OXYDEP_DOM')
 	id_NUT = find_index(par_name, 'B_OXYDEP_NUT')

@@ -7,19 +7,23 @@
 ! FITNESS FOR A PARTICULAR PURPOSE. A copy of the license is provided in
 ! the COPYING file at the root of the BROM distribution.
 !-----------------------------------------------------------------------
-! Original author(s): Evgeniy Yakushev, Shamil Yakubov, 
+! Original author(s): Evgeniy Yakushev, Shamil Yakubov,
 !                     Elizaveta Protsenko, Phil Wallhead
 !-----------------------------------------------------------------------
-    
-    
-    program main
-    
-    use brom_transport, only: init_brom_transport, do_brom_transport, clear_brom_transport
 
+
+    program main
+
+    use brom_transport, only: init_brom_transport, do_brom_transport, clear_brom_transport
+    integer :: starttime, stoptime, rate
     !initializing, writing from gotm data and fabm.yaml included
     call init_brom_transport()
     !main cycle
+    call system_clock(count_rate=rate)
+    call system_clock(starttime)
     call do_brom_transport()
+    call system_clock(stoptime)
+    write (*,*) 'Wall time spent in do_brom_transport: ', real(stoptime - starttime)/real(rate)
     !clear all
     !call clear_brom_transport()
 
