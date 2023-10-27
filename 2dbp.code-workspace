@@ -28,7 +28,7 @@
 		],
 		"fortran.linter.extraArgs": [
 			"-Wall",
-            "-J/home/eya/src/2dbp/build/debug/modules",
+            "-J/home/eya/src/2DBP/build/debug/modules",
 		],
 	}
 }
