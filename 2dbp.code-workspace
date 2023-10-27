@@ -7,7 +7,7 @@
 			"path": "../fabm-omp"
 		},
 		{
-			"path": "../brom-bgh"
+			"path": "../BROM"
 		},
 		{
 			"path": "../../cases/laptev"
@@ -20,11 +20,11 @@
 		"fortran.fortls.directories": [
 			"./**",
 			"/home/eya/src/fabm-omp/**",
-			"/home/eya/src/brom-bgh/**",
+			"/home/eya/src/BROM/**",
 		],
 		"fortran.linter.includePaths": [
 			"/usr/include",
-            "/home/eya/src/2dbp/**",
+            "/home/eya/src/2DBP/**",
 		],
 		"fortran.linter.extraArgs": [
 			"-Wall",
