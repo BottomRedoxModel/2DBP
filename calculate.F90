@@ -638,7 +638,7 @@
                 dcc(i,k,:) = (sink(i,k-1,:)-sink(i,k,:)) / hz(k) !-1)
             end do
                 dcc(i,1,:) = - sink(i,1,:)/ hz(1)
-                dcc(i,k_max,:) = 0.0 !-sink(i,k_max,:) / hz(k) !0.0
+                dcc(i,k_max,:) = -sink(i,k_max,:) / hz(k_max) !0.0
             !!Time integration
             !cc water surface   
             do ip=1,par_max
