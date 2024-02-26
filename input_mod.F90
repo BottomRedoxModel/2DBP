@@ -163,8 +163,10 @@ contains
           get_netcdf_dimension(1) = curr%dim_len
           if (.not.present(indim_id_2)) return
         end if
-        if (present(indim_id_2) .and. curr%dim_id==indim_id_2) then
-          get_netcdf_dimension(2) = curr%dim_len
+        if (present(indim_id_2)) then
+          if (curr%dim_id==indim_id_2) then
+            get_netcdf_dimension(2) = curr%dim_len
+          end if
         end if
       end select
       call self%next()

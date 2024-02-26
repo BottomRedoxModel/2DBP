@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.23)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
@@ -13,6 +13,7 @@ endif()
 
 # Customize compiler flags
 if(${CMAKE_Fortran_COMPILER_ID} STREQUAL "GNU")
+#  set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -ffree-line-length-none -fcheck=all")
   set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -ffree-line-length-none")
 elseif(${CMAKE_Fortran_COMPILER_ID} STREQUAL "Cray")
   set (CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -N 1023")
@@ -38,9 +39,11 @@ endif()
 find_path(FABM_BASE src/fabm.F90 DOC "Path to FABM source directory.")
 mark_as_advanced(CLEAR FABM_BASE)
 set(FABM_FORCED_HOST brom)
+set(FABM_BUILD_OMP_API ON CACHE BOOL "Build OpenMPI API" FORCE)
 add_subdirectory(${FABM_BASE}/src fabm)
-set(FABM_LIBRARIES fabm)
+set(FABM_LIBRARIES fabm fabm_omp)
 set(FABM_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/fabm/modules)
+set(FABM_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/fabm/omp/modules)
 
 add_executable(brom WIN32
                calculate.F90
@@ -52,10 +55,10 @@ add_executable(brom WIN32
                ids.F90
                tridiagonal.F90
                util.F90
-	       input_mod.F90
-	       item_mod.F90
-	       list_mod.F90
-	       types_mod.F90)
+	             input_mod.F90
+	             item_mod.F90
+	             list_mod.F90
+	             types_mod.F90)
 
 set_property(TARGET brom APPEND PROPERTY INCLUDE_DIRECTORIES "${FABM_INCLUDE_DIRS}")
 set_property(TARGET brom APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${FABM_INCLUDE_DIRS}")
@@ -66,10 +69,13 @@ target_link_libraries(brom yaml)
 target_link_libraries(brom ${FABM_LIBRARIES})
 target_link_libraries(brom "${NetCDF_LIBRARIES}")
 
+find_package(OpenMP)
+target_link_libraries(brom OpenMP::OpenMP_Fortran)
+
 if(${CMAKE_Fortran_COMPILER_ID} STREQUAL "Intel")
   if(WIN32)
     set_property(TARGET brom APPEND PROPERTY COMPILE_FLAGS "/nofpp")
-    target_compile_options(brom PRIVATE /nothreads /libs:static /libs:qwin)
+    target_compile_options(brom PRIVATE /threads /libs:qwin)
   endif()
 endif()
 

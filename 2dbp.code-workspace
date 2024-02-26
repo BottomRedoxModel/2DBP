@@ -1,0 +1,34 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../fabm-omp"
+		},
+		{
+			"path": "../BROM"
+		},
+		{
+			"path": "../../cases/laptev"
+		}
+	],
+	"settings": {
+    	"cmake.cmakePath": "/home/eya/miniconda3/bin/cmake",
+    	"cmake.configureOnOpen": false,
+		"fortran.fortls.path": "/home/eya/miniconda3/bin/fortls",
+		"fortran.fortls.directories": [
+			"./**",
+			"/home/eya/src/fabm-omp/**",
+			"/home/eya/src/BROM/**",
+		],
+		"fortran.linter.includePaths": [
+			"/usr/include",
+            "/home/eya/src/2DBP/**",
+		],
+		"fortran.linter.extraArgs": [
+			"-Wall",
+            "-J/home/eya/src/2DBP/build/debug/modules",
+		],
+	}
+}

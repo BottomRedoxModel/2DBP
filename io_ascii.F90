@@ -15,7 +15,7 @@
 
     module io_ascii
 
-    use fabm, only: type_fabm_model
+    use fabm_omp, only: type_fabm_model => type_fabm_omp_model
     use fabm_driver
     use yaml_types
     use yaml,yaml_parse=>parse,yaml_error_length=>error_length
@@ -285,7 +285,7 @@
 
     !Output variables
 !   real(rk), dimension(:,:,:), pointer, intent(out) :: cc, vv
-    real(rk), dimension(:,:,:), pointer :: cc, vv
+    real(rk), dimension(:,:,:), intent(inout) :: cc, vv
 
     !Local variables
     integer                                 :: d_year_start, julianday_start, k_max_start, par_max_start
