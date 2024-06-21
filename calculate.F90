@@ -133,8 +133,6 @@
                 if (bott_flux_with_diff.eq.1) then
                     bott_flux = 0.0_rk
                     bott_source = 0.0_rk                
-    
-    
     !                model%get_bottom_sources(i, i, bott_flux(i:i,:),bott_source(i:i,:))
                     fick(i,k_max+1,:) = bott_flux(i,:)
                 else
@@ -569,20 +567,19 @@
         u_1c = 0.0_rk
         sink(i,:,:) = 0.0_rk
         wti(i,:,:) = 0.0_rk 
-    
+!--------------------------------------------------------------------   
         ! wti() at water column layer midpoints including Air-sea interface (unused) 
         !    and not including SWI:  (as wbio in FABM) 
         !    wti(i,1:k_bbl_sed,:) = max(0.0_rk,wbio(i,1:k_bbl_sed,:))
-            wti(i,1:k_bbl_sed,:) = wbio(i,1:k_bbl_sed,:)
+            wti(i,1:(k_bbl_sed-1),:) = wbio(i,1:(k_bbl_sed-1),:)
             wti(i,1,:) = 0.0_rk !as boundary condition 
-        ! check for light microplast
+        ! check for light microplast and/or gas
             do ip=1,par_max
                if (wti(i,2,ip)<0.0_rk)  then
                     wti(i,2,ip) = 0.0_rk  !check for is_gas??
                endif
             enddo
-            
-    
+!--------------------------------------------------------------------   
         if (constant_w_sed.eq.1) then  ! case constant burial velosity
             ! wti() at sediment layer midpoints: w_b, backgound burying velocity
             do k=k_bbl_sed,k_max+1
@@ -590,30 +587,30 @@
                    wti(i,k,ip) = w_binf
                 enddo
             enddo
-            
-            ! Apply "Burial coeficient" to increase wti () exactly to the SWI at proportional to the
-            !    settling velocity in the water column (0<bu_co<1)
-            do ip=1,par_max
-                  wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) + bu_co*wti(i,k_bbl_sed-1,ip)
-            end do
-        
         endif
-    
+!--------------------------------------------------------------------        
         ! wti() increases on burying rate, that depends of change of particles volume in the layer above the SWI 
         ! and can not be higher than defined by CFL criteria)
         if (dynamic_w_sed.eq.1) then ! case  burial velosity depending on particles accumulation above SWI
         ! we accelerate burying rate due to an increase of particles volume dVV()[m3/sec] in water layer just above SWI
-            do k=(k_bbl_sed+1),k_max !  do k=1,k_max !        do k=k_bbl_sed,k_max
-                do ip=1,par_max
-    !                wti(i,k,ip) = wti(i,k,ip) + max(0.0_rk,dVV(i,k_bbl_sed,1))/fresh_PM_poros !/dz(k_bbl_sed)
-                   if (is_solid(ip).eq.1) then   
-                          wti(i,k,ip) = wti(i,k,ip) + min(max(0.0_rk,dVV(i,k_bbl_sed,1)) &
-                                       *dz(k_bbl_sed)/(1.0_rk-fresh_PM_poros),0.5_rk*(dz(k_bbl_sed)*dtt))  
-                   endif
+            do ip=1,par_max
+                do k=k_bbl_sed,k_max+1       
+                    wti(i,k,ip) = wti(i,k,ip) + dVV(i,k_bbl_sed,1)/(1.0_rk-fresh_PM_poros) ! newer from Berre
                 end do
             enddo
         endif
-    
+!--------------------------------------------------------------------           
+            ! Apply "Burial coeficient" to increase wti () exactly to the SWI at proportional to the
+            !    settling velocity in the water column (0<bu_co<1) or (if bu_co <1) calulate it as a ratio of dVV/hz)
+        do ip=1,par_max
+            if(bu_co.gt.0) then
+                wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) + bu_co*wti(i,k_bbl_sed-1,ip)
+            else
+                wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) +  dVV(i,k_bbl_sed,1)/(1.0_rk-fresh_PM_poros)/hz(k)*wti(i,k_bbl_sed-1,ip) 
+                ! dVV/hz is the share of particles present in the bottom layer that should be burried  
+            endif    
+        end do        
+!--------------------------------------------------------------------             
         do ip=1,par_max
           if (is_gas(ip).eq.1) then
               wti(:,:,ip)=0.0_rk
