@@ -528,15 +528,17 @@
       real(rk)                               :: temp_matrix(i_max,k_max), dum(1), z2(k_max+1), day_part
       !Note: The input arguments to nf90_put_var MUST be vectors, even if the length is 1
       !      Removing the dimension(1) or (1) from dum above triggers a spurious error "not finding nf90_put_var"
-      integer                                :: ip, i, i_sec, istep_out
-  
-  
+      integer                                :: ip, i, i_sec, istep_out, i_day_share
+        !integer,parameter         :: timestepkind = selected_int_kind(12)   !how to make int(8)
+        !integer(kind=timestepkind):: i_sec  !declared as int(8) it will not work with netcdf functions 
   !    day_part=real(id)/real(idt)
   !    i_sec=((i_day-1)*86400 + int((86400*(id/100))/(idt/100)))/output_step ! as in Horten
   !    istep_out = int((julianday)*86400/input_step)
   
       day_part=real(id)/real(idt)
-      i_sec=int(((i_day-1)*86400 + int(86400*id/idt))/output_step) ! time count for saving  (in array numbers)
+      i_day_share = 86400/output_step  !a multipier allowing to decrease max int number in i_sec
+!      i_sec=int(((i_day-1)*86400 + int(86400*id/idt))/output_step) ! time count for saving  (in array numbers)
+      i_sec=int(((i_day-1)*i_day_share + int(i_day_share*id/idt))) ! time count for saving  (in array numbers)      
       istep_out = max(1, int(((julianday-1)*86400 + int(86400*id/idt))/input_step)) ! time count to select data from arrays, i.e. temp, salt
   
    !Define nf90_put_var arguments "start" and "count" for z, z2, time, (cc,t,s) and (fick,kz)
