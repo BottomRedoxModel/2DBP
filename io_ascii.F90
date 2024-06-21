@@ -506,6 +506,7 @@
     real(rk)                            :: hz_sed_min         !Minimum hz in the sediments [m]
     real(rk)                            :: hz_sed_max         !Maximum hz in the sediments [m]
     real(rk)                            :: scale_fac, scale_fac_next !Scale factors to ensure that total BBL thickness = bbl_thickness
+    real(rk)                            :: mult_bbl         ! Scale factor to increase resolution in the BBL (=1)
     integer                             :: k
 
     ! The grid structure is:
@@ -558,6 +559,7 @@
         dz(k_wat_bbl-1) = dz_w(k_wat_bbl-1) - 0.5_rk*bbl_thickness
     end if
 
+    mult_bbl=0.5_rk
 
     !Define the grid in the BBL
     do k=k_wat_bbl+1,k_max
@@ -566,7 +568,7 @@
         z(k)    = z(k-1) + dz(k-1)   !The prescribed BBL thickness is traversed with layers geometrically decreasing in thickness
         scale_fac_next = bbl_thickness / (0.5_rk*hz(k)+sum(hz(k_wat_bbl+1:k))) !Rescaling factor after the NEXT layer is included
         if (0.5_rk*hz(k)*scale_fac_next<hz_bbl_min) then !If the NEXT layer will be too thin (after rescaling), complete the BBL by rescaling all layers so that total thickness = bbl_thickness
-            scale_fac = bbl_thickness/sum(hz(k_wat_bbl+1:k))
+            scale_fac = mult_bbl*bbl_thickness/sum(hz(k_wat_bbl+1:k))
             hz(k_wat_bbl+1:k) = scale_fac * hz(k_wat_bbl+1:k)
             hz(k)=hz(k)-hz_sed_min  !here we add one thin (hz_sed_min) layer above the SWI
             hz(k+1)=hz_sed_min
