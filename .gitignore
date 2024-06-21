@@ -2,3 +2,5 @@
 cmake/
 out/
 build/
+.vscode
+*.code-workspace
