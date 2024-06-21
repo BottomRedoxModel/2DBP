@@ -568,6 +568,7 @@
         sink(i,:,:) = 0.0_rk
         wti(i,:,:) = 0.0_rk 
 !--------------------------------------------------------------------   
+!--------------------------------------------------------------------   
         ! wti() at water column layer midpoints including Air-sea interface (unused) 
         !    and not including SWI:  (as wbio in FABM) 
         !    wti(i,1:k_bbl_sed,:) = max(0.0_rk,wbio(i,1:k_bbl_sed,:))
@@ -580,6 +581,7 @@
                endif
             enddo
 !--------------------------------------------------------------------   
+!--------------------------------------------------------------------   
         if (constant_w_sed.eq.1) then  ! case constant burial velosity
             ! wti() at sediment layer midpoints: w_b, backgound burying velocity
             do k=k_bbl_sed,k_max+1
@@ -588,6 +590,7 @@
                 enddo
             enddo
         endif
+!--------------------------------------------------------------------        
 !--------------------------------------------------------------------        
         ! wti() increases on burying rate, that depends of change of particles volume in the layer above the SWI 
         ! and can not be higher than defined by CFL criteria)
