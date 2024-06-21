@@ -1,4 +1,4 @@
-! This file is part of Bottom RedOx Model (BROM, v.1.1).
+ ! This file is part of Bottom RedOx Model (BROM, v.1.1).
 ! BROM is free software: you can redistribute it and/or modify it under
 ! the terms of the GNU General Public License as published by the Free
 ! Software Foundation (https://www.gnu.org/licenses/gpl.html).
@@ -65,7 +65,7 @@
         real(rk), allocatable, target, dimension(:)     :: pco2_atm_1d, wind_speed_1d, hice, aice, swradWm2, swradWm2_1d, hice_1d, aice_1d, lat_light_1d
         real(rk), allocatable, target, dimension(:,:)   :: surf_flux, bott_flux, bott_source, Izt, pressure, depth, cell_thickness
         real(rk), allocatable, target, dimension(:,:,:) :: t, s, u_x
-        real(rk), allocatable, target, dimension(:,:,:) :: vv, dvv, cc, cc_out, dcc, dcc_R, wbio, air_sea_flux ! add the description cc - all params, dcc - volumes of solids
+        real(rk), allocatable, target, dimension(:,:,:) :: vv, dVV, cc, cc_out, dcc, dcc_R, wbio, air_sea_flux ! add the description cc - all params, dcc - volumes of solids
         real(rk), allocatable, target, dimension(:,:)   :: wbio_2d
         ! vv -> 2d
     
@@ -103,10 +103,14 @@
         real(rk)                                  :: phi_0, phi_inf, z_decay_phi, w_binf, rho_def, wat_con_0, wat_con_inf
     !    real(rk)                                  :: kzCFL(k_bbl_sed-1,steps_in_yr), kz_molCFL(k_max-1,par_max)
     
-    
+        integer                                   :: inj_changing !for changing with time injection
+        real(rk)                                  :: inj_square   ! square of the layer with injection
         !Constant forcings that can be read as parameters from brom.yaml
         real(rk) :: wind_speed, pco2_atm, mu0_musw, dphidz_SWI , hx_min, hx_max, dy ! dx_adv
-    
+     
+        ! Injection of something as a function or years
+        real(rk)     :: inj_smth(400)          
+
         real(rk)     :: lat_light, Io   !Variables used to calculate surface irradiance from latitude
            ! Environment
         real(rk),target :: decimal_yearday
@@ -390,7 +394,7 @@
         allocate(sink(i_max,k_max+1,par_max))  !sinking flux (mmol/m2/s, positive downward)
         allocate(sink_per_day(i_max,k_max+1,par_max))
         allocate(vv(i_max,k_max,1))
-        allocate(dvv(i_max,k_max,1))
+        allocate(dVV(i_max,k_max,1))
         allocate(Izt(i_max,k_max))
         allocate(pressure(i_max,k_max))
         allocate(cell_thickness(i_max,k_max))
@@ -587,7 +591,9 @@
             end if
           enddo
         end do
-    
+        
+        is_solid(26:28) = 1
+
         do ip=1,par_max
             if (is_gas(ip).eq.1) then
                 write(*,*) "Gaseous variable: ", trim(par_name(ip))   
@@ -882,7 +888,7 @@
                     write(*,*) ("hmix_filename_" // trim(par_name(ip)))
                     do k=1,k_wat_bbl
                         do i_day=1,days_in_yr
-                            read(20, *) i_dummy,i_dummy,cc_hmix(i_max,ip,k,i_day) ! NODC data (i_max,par_max,k_max,days_in_yr)
+                            read(20, *) i_dummy,i_dummy,cc_hmix(i_max,ip,k,i_day) ! data for relaxation(i_max,par_max,k_max,days_in_yr)
                         end do
                     end do
                     close(20)
@@ -901,7 +907,19 @@
                     enddo
                 end if
             end do
-    
+
+        ! read an array for injecting of something changing yearly
+            
+            inj_changing = get_brom_par("inj_changing")
+            if (inj_changing.ne.0) then 
+                open(21, file= get_brom_name("inj_smth_variable"))
+                inj_smth=0.0_rk
+                do iday=1,115
+                    read(21, *) i_dummy, inj_smth(iday) ! 
+                enddo               
+                inj_square = get_brom_par("inj_square")
+            endif
+
         open(8,FILE = 'burying_rate.dat')
         !Set constant forcings
         wind_speed = get_brom_par("wind_speed")    ! 10m wind speed [m s-1]
@@ -928,7 +946,7 @@
         !Executes the offline vertical transport model BROM-transport
     
         use calculate, only:  calculate_phys, calculate_sed, calculate_sed_eya, calculate_bubble
-    
+
         implicit none
     
         integer      :: id, idt, idf                     !time related
@@ -1001,13 +1019,13 @@
         stop_inj3 = get_brom_par("stop_inj3")
         !i_sec_pr = get_brom_par("i_sec_pr")
         idt = int(86400._rk/dt)                     !number of cycles per day
-        model_year = 0
         kzti = 0.0_rk
         sink=0.0_rk
         wti=0.0_rk
         w_bub=0.0_rk
         dVV = 0.0_rk
-    
+        model_year = 0
+
             !convert bottom boundary values from 'mass/pore water ml' for dissolved and 'mass/mass' for solids into 'mass/total volume'
         if (bc_units_convert.eq.1) then
             do i=i_min,i_max
@@ -1037,7 +1055,15 @@
             if (julianday==1) model_year = model_year + 1
     
         if (k_points_below_water.gt.0) then
-            write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000.
+            write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
+                  "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
+                  "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
+          !  write (*,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3, a, e9.3, a, e9.3)') " i_day:", &
+          !  i_day, " model_year:", model_year, "; julianday:", julianday, &
+          !  "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
+          !  wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
+          !  wti(i_inj,k_bbl_sed+2,1)*365.*8640000., "; sink_of_POML:" , sink(i,k_bbl_sed-1,id_POML)
+
         else
             write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000.
         endif
@@ -1220,11 +1246,6 @@
                     id_O2, dphidz_SWI, cc0, bott_flux, bott_source, w_binf, bu_co, is_gas)
             enddo
     
-    !       !_______Bubble floating_________!
-     !       do i=i_min, i_max
-      !          call calculate_bubble(i, k_max, par_max, model, cc, w_bub, &
-       !            sink, dcc, hz, dz, k_bbl_sed, julianday, dt, freq_float, is_gas, wbio, cc0)
-        !    enddo
            !_______Bubble rising_________!
             dcc = 0.0_rk
     
@@ -1248,11 +1269,17 @@
             i = 1
     
         if (k_points_below_water.gt.0) then
-              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, e9.3, a, e9.3, a, e9.3)') " i_day:", &
-                  i_day, " model_year:", model_year, "; julianday:", julianday, &
-                  "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
-                  wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
-                  wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,id_POML)
+              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3,6(a, e9.3))') &
+                    "i_day:", i_day, " year:", model_year, "; jday:", julianday, &
+                  " ; dVV(k_bbl_sed): ", dVV(1,k_bbl_sed,1), &
+                  " ; w_sed_bl(cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000., &
+                   " ;dVV_POML: " , sink(i,k_bbl_sed-1,id_POML)/rho(id_POML), &
+                   " ;dVV_POMR: " , sink(i,k_bbl_sed-1,id_POMR)/rho(id_POML), &
+                   " ;sink_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4), &
+                   " ;rho_Mn4: " , rho(id_Mn4), &
+                   " ;dVV_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4)/rho(id_Mn4), &
+                   " ;dVV_Fe3: " , sink(i,k_bbl_sed-1,id_Fe3)/rho(id_Fe3) 
+                  !#, "; w_sed_inj(cm/yr): "wti(i_inj,k_bbl_sed+2,1)*365.*8640000.,)
         endif
     
            !________Horizontal relaxation_________!
@@ -1369,7 +1396,17 @@
     
     !________Injection____________________!
     ! Source of "substance" in XXXX mmol/sec, should be devided to the volume of the grid cell, i.e. dz(k)*dx(i)*dx(i)
-            if (inj_switch.ne.0)  then
+          if (inj_switch.ne.0)  then
+            if (inj_changing.ne.0) then
+                do ip = 1, par_max
+                    if (par_name(ip).eq.get_brom_name("inj_var_name")) exit
+                    inj_num = ip+1
+                end do
+                cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
+                  !       dt/freq_float &  ! w/o  for MgOH2
+                  !  +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
+                    +  dt*inj_smth(model_year+1)/(inj_square*dz(k_inj))
+            else     
               if (i_day.ge.start_inj.and.i_day.lt.stop_inj) then
                 if (inj_switch.eq.1)  then
                     do ip = 1, par_max
@@ -1379,6 +1416,12 @@
                     cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
                       !       dt/freq_float &  ! w/o  for MgOH2
                         +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
+    !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
+    !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
+                    ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
+                   ! +  dt*0.188_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !3%
+                  !  cc(i_inj,k_inj,id_Alk)=cc(i_inj,k_inj,id_Alk) &
+                  !      +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    
                 else
                   if (i_day.ne.start_inj.or.(real(id)/real(idt)).gt.start_inj_part_day) then
                     inj_switch=0 !!!!!! we do it only once
@@ -1400,6 +1443,7 @@
                 endif
               endif
             end if
+          endif
     
             !________Check for NaNs (stopping if any found)____________________!
             do ip=1,par_max
