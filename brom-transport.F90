@@ -1,4 +1,4 @@
-! This file is part of Bottom RedOx Model (BROM, v.1.1).
+ ! This file is part of Bottom RedOx Model (BROM, v.1.1).
 ! BROM is free software: you can redistribute it and/or modify it under
 ! the terms of the GNU General Public License as published by the Free
 ! Software Foundation (https://www.gnu.org/licenses/gpl.html).
@@ -591,7 +591,9 @@
             end if
           enddo
         end do
-    
+        
+        is_solid(26:28) = 1
+
         do ip=1,par_max
             if (is_gas(ip).eq.1) then
                 write(*,*) "Gaseous variable: ", trim(par_name(ip))   
@@ -1053,7 +1055,9 @@
             if (julianday==1) model_year = model_year + 1
     
         if (k_points_below_water.gt.0) then
-            write (*,'(a, i4, a, i4, a, f9.4)') " model year:", model_year, "; julianday:", julianday,"; w_sed (cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000.
+            write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
+                  "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
+                  "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
           !  write (*,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3, a, e9.3, a, e9.3)') " i_day:", &
           !  i_day, " model_year:", model_year, "; julianday:", julianday, &
           !  "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
@@ -1238,15 +1242,10 @@
                     sink, dcc, dVV, bctype_top, bctype_bottom, bc_top, &
                     bc_bottom, hz, dz, k_bbl_sed, wbio, w_b, u_b, julianday, &
                     dt, freq_sed, dynamic_w_sed, constant_w_sed, is_solid, &
-                    rho, phi1, fick, k_sed1, K_O2s, kz_bio, fresh_PM_poros, &
+                    rho, phi1, fick, k_sed1, K_O2s, kz_bio, &
                     id_O2, dphidz_SWI, cc0, bott_flux, bott_source, w_binf, bu_co, is_gas)
             enddo
     
-    !       !_______Bubble floating_________!
-     !       do i=i_min, i_max
-      !          call calculate_bubble(i, k_max, par_max, model, cc, w_bub, &
-       !            sink, dcc, hz, dz, k_bbl_sed, julianday, dt, freq_float, is_gas, wbio, cc0)
-        !    enddo
            !_______Bubble rising_________!
             dcc = 0.0_rk
     
@@ -1266,15 +1265,25 @@
                     dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,ip))/rho(ip)
                   end if
                end do
+                  if (fresh_PM_poros.gt.0.0_rk) then
+                    dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,id_POMR))/rho(id_POMR)*(1.0_rk/(1.0_rk-fresh_PM_poros)-1.0_rk) 
+                    dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,id_POML))/rho(id_POML)*(1.0_rk/(1.0_rk-fresh_PM_poros)-1.0_rk) 
+                  endif
             enddo
             i = 1
     
         if (k_points_below_water.gt.0) then
-              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3, a, e9.3, a, e9.3)') " i_day:", &
-                  i_day, " model_year:", model_year, "; julianday:", julianday, &
-                  "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
-                  wti(1,k_bbl_sed+2,1)*365.*8640000., "; w_sed_inj(cm/yr):", &
-                  wti(i_inj,k_bbl_sed+2,1)*365.*8640000., ";sink_of_POML:" , sink(i,k_bbl_sed-1,id_POML)
+              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3,6(a, e9.3))') &
+                    "i_day:", i_day, " year:", model_year, "; jday:", julianday, &
+                    " ; w_sed_bl(cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000., &
+                  " ; dVV(k_bbl_sed): ", dVV(1,k_bbl_sed,1), &
+                   " ;dVV_POML: " , sink(i,k_bbl_sed-1,id_POML)/rho(id_POML), &
+                   " ;dVV_POMR: " , sink(i,k_bbl_sed-1,id_POMR)/rho(id_POML), &
+                   " ;sink_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4), &
+                   " ;rho_Mn4: " , rho(id_Mn4), &
+                   " ;dVV_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4)/rho(id_Mn4), &
+                   " ;dVV_Fe3: " , sink(i,k_bbl_sed-1,id_Fe3)/rho(id_Fe3) 
+                  !#, "; w_sed_inj(cm/yr): "wti(i_inj,k_bbl_sed+2,1)*365.*8640000.,)
         endif
     
            !________Horizontal relaxation_________!
@@ -1411,6 +1420,12 @@
                     cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
                       !       dt/freq_float &  ! w/o  for MgOH2
                         +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
+    !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
+    !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
+                    ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
+                   ! +  dt*0.188_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !3%
+                  !  cc(i_inj,k_inj,id_Alk)=cc(i_inj,k_inj,id_Alk) &
+                  !      +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    
                 else
                   if (i_day.ne.start_inj.or.(real(id)/real(idt)).gt.start_inj_part_day) then
                     inj_switch=0 !!!!!! we do it only once
