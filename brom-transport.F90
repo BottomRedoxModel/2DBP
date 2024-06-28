@@ -1262,7 +1262,7 @@
                do ip=1,par_max !Sum over contributions from each particulate variable
                   if (is_solid(ip).eq.1) then
                   !change of Volume of a cell as a function of biology, salt precipitation and sinking
-                    dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,ip))/rho(ip)
+                    dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,ip))/rho(ip) ! m3/m2/s = m/s
                   end if
                end do
                   if (fresh_PM_poros.gt.0.0_rk) then
@@ -1273,16 +1273,16 @@
             i = 1
     
         if (k_points_below_water.gt.0) then
-              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3,6(a, e9.3))') &
+              if (id.eq.1) write (8,'(a, i8,a, i4, a, i4,  a, f6.3,7(a, e9.3))') &
                     "i_day:", i_day, " year:", model_year, "; jday:", julianday, &
                     " ; w_sed_bl(cm/yr):", wti(1,k_bbl_sed+2,1)*365.*8640000., &
                   " ; dVV(k_bbl_sed): ", dVV(1,k_bbl_sed,1), &
                    " ;dVV_POML: " , sink(i,k_bbl_sed-1,id_POML)/rho(id_POML), &
                    " ;dVV_POMR: " , sink(i,k_bbl_sed-1,id_POMR)/rho(id_POML), &
-                   " ;sink_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4), &
-                   " ;rho_Mn4: " , rho(id_Mn4), &
                    " ;dVV_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4)/rho(id_Mn4), &
-                   " ;dVV_Fe3: " , sink(i,k_bbl_sed-1,id_Fe3)/rho(id_Fe3) 
+                   " ;dVV_Fe3: " , sink(i,k_bbl_sed-1,id_Fe3)/rho(id_Fe3), & 
+                   " ;sink_Mn4: " , sink(i,k_bbl_sed-1,id_Mn4), &
+                   " ;rho_Mn4: " , rho(id_Mn4)
                   !#, "; w_sed_inj(cm/yr): "wti(i_inj,k_bbl_sed+2,1)*365.*8640000.,)
         endif
     

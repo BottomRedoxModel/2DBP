@@ -596,6 +596,7 @@
             do ip=1,par_max
                 do k=k_bbl_sed,k_max+1       
                     wti(i,k,ip) = wti(i,k,ip) + dVV(i,k_bbl_sed,1)
+                    ! dVV is in m/s
                 end do
             enddo
         endif
