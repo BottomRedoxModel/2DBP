@@ -572,7 +572,9 @@
         !    and not including SWI:  (as wbio in FABM) 
         !    wti(i,1:k_bbl_sed,:) = max(0.0_rk,wbio(i,1:k_bbl_sed,:))
             wti(i,1:(k_bbl_sed-1),:) = wbio(i,1:(k_bbl_sed-1),:)
+            wti(i,1:(k_bbl_sed-1),:) = wbio(i,1:(k_bbl_sed-1),:)
             wti(i,1,:) = 0.0_rk !as boundary condition 
+        ! check for light microplast and/or gas
         ! check for light microplast and/or gas
             do ip=1,par_max
                if (wti(i,2,ip)<0.0_rk)  then
@@ -602,6 +604,7 @@
         endif
 !--------------------------------------------------------------------           
             ! Apply "Burial coeficient" to increase wti () exactly to the SWI at proportional to the
+            !    settling velocity in the water column (0<bu_co<1) or (if bu_co <1) calulate it as a ratio of dVV/hz)
             !    settling velocity in the water column (0<bu_co<1) or (if bu_co <1) calulate it as a ratio of dVV/hz)
         do ip=1,par_max
             if(bu_co.gt.0) then

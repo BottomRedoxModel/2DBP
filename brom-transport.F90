@@ -1,4 +1,5 @@
  ! This file is part of Bottom RedOx Model (BROM, v.1.1).
+ ! This file is part of Bottom RedOx Model (BROM, v.1.1).
 ! BROM is free software: you can redistribute it and/or modify it under
 ! the terms of the GNU General Public License as published by the Free
 ! Software Foundation (https://www.gnu.org/licenses/gpl.html).
@@ -594,6 +595,9 @@
         
         is_solid(26:28) = 1
 
+        
+        is_solid(26:28) = 1
+
         do ip=1,par_max
             if (is_gas(ip).eq.1) then
                 write(*,*) "Gaseous variable: ", trim(par_name(ip))   
@@ -1058,6 +1062,9 @@
             write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
                   "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
                   "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
+            write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
+                  "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
+                  "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
           !  write (*,'(a, i8,a, i4, a, i4, a, e9.3, a, f6.3, a, e9.3, a, e9.3)') " i_day:", &
           !  i_day, " model_year:", model_year, "; julianday:", julianday, &
           !  "; dVV(k_bbl_sed):", dVV(1,k_bbl_sed,1), "; w_sed_bl(cm/yr):", &
@@ -1420,6 +1427,12 @@
                     cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
                       !       dt/freq_float &  ! w/o  for MgOH2
                         +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
+    !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
+    !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
+                    ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
+                   ! +  dt*0.188_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !3%
+                  !  cc(i_inj,k_inj,id_Alk)=cc(i_inj,k_inj,id_Alk) &
+                  !      +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    
     !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
     !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
                     ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
