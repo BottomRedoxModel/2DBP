@@ -4,31 +4,32 @@
 			"path": "."
 		},
 		{
-			"path": "../fabm-omp"
+			"path": "/home/ey/fabm-omp-sh"
 		},
 		{
-			"path": "../BROM"
+			"path": "/home/ey/src/BROM"
 		},
 		{
-			"path": "../../cases/laptev"
+			"path": "/home/ey/EY/cases/varna"
 		}
 	],
 	"settings": {
-    	"cmake.cmakePath": "/home/eya/miniconda3/bin/cmake",
-    	"cmake.configureOnOpen": false,
-		"fortran.fortls.path": "/home/eya/miniconda3/bin/fortls",
+                "cmake.configureOnOpen": false,
+		"fortran.fortls.path": "/home/ey/miniconda3/bin/fortls",
 		"fortran.fortls.directories": [
 			"./**",
-			"/home/eya/src/fabm-omp/**",
-			"/home/eya/src/BROM/**",
+			"/home/ey/src/fabm-omp-sh/**",
+			"/home/ey/src/BROM/**",
 		],
 		"fortran.linter.includePaths": [
 			"/usr/include",
-            "/home/eya/src/2DBP/**",
+            "/home/ey/src/2DBP/**",
 		],
 		"fortran.linter.extraArgs": [
 			"-Wall",
-            "-J/home/eya/src/2DBP/build/debug/modules",
+            "-J/home/ey/src/2DBP/build/debug/modules",
 		],
+		"editor.multiCursorModifier": "ctrlCmd",
+		"cmake.cmakePath": "/home/ey/miniconda3/bin/cmake", 
 	}
 }

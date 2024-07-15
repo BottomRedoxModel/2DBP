@@ -525,7 +525,7 @@
             dcc, dVV, bctype_top, bctype_bottom, bc_top, bc_bottom, &
             hz, dz, k_bbl_sed, wbio, w_b, u_b, julianday, dt, freq_sed, &
             dynamic_w_sed, constant_w_sed, is_solid, rho, phi1, fick, &
-            k_sed1, K_O2s, kz_bio, fresh_PM_poros, id_O2, dphidz_SWI, &
+            k_sed1, K_O2s, kz_bio, id_O2, dphidz_SWI, &
             cc0, bott_flux, bott_source, w_binf, bu_co, is_gas)
     
         !Calculates vertical advection (sedimentation) in the water column and sediments
@@ -541,7 +541,7 @@
         real(rk), dimension(:,:), intent(in)        :: bc_top, bc_bottom, phi1, w_b, u_b, kz_bio
         real(rk), dimension(:), intent(in)          :: hz, dz, rho
         real(rk), intent(in)                        :: dt, K_O2s, dphidz_SWI, cc0
-        real(rk), intent(in)                        :: fresh_PM_poros, w_binf, bu_co
+        real(rk), intent(in)                        :: w_binf, bu_co
     
         !Output variables
         real(rk), dimension(:,:,:), intent(in)      :: wbio
@@ -572,7 +572,9 @@
         !    and not including SWI:  (as wbio in FABM) 
         !    wti(i,1:k_bbl_sed,:) = max(0.0_rk,wbio(i,1:k_bbl_sed,:))
             wti(i,1:(k_bbl_sed-1),:) = wbio(i,1:(k_bbl_sed-1),:)
+            wti(i,1:(k_bbl_sed-1),:) = wbio(i,1:(k_bbl_sed-1),:)
             wti(i,1,:) = 0.0_rk !as boundary condition 
+        ! check for light microplast and/or gas
         ! check for light microplast and/or gas
             do ip=1,par_max
                if (wti(i,2,ip)<0.0_rk)  then
@@ -595,18 +597,20 @@
         ! we accelerate burying rate due to an increase of particles volume dVV()[m3/sec] in water layer just above SWI
             do ip=1,par_max
                 do k=k_bbl_sed,k_max+1       
-                    wti(i,k,ip) = wti(i,k,ip) + dVV(i,k_bbl_sed,1)/(1.0_rk-fresh_PM_poros) ! newer from Berre
+                    wti(i,k,ip) = wti(i,k,ip) + dVV(i,k_bbl_sed,1)
+                    ! dVV is in m/s
                 end do
             enddo
         endif
 !--------------------------------------------------------------------           
             ! Apply "Burial coeficient" to increase wti () exactly to the SWI at proportional to the
             !    settling velocity in the water column (0<bu_co<1) or (if bu_co <1) calulate it as a ratio of dVV/hz)
+            !    settling velocity in the water column (0<bu_co<1) or (if bu_co <1) calulate it as a ratio of dVV/hz)
         do ip=1,par_max
             if(bu_co.gt.0) then
                 wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) + bu_co*wti(i,k_bbl_sed-1,ip)
             else
-                wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) +  dVV(i,k_bbl_sed,1)/(1.0_rk-fresh_PM_poros)/hz(k)*wti(i,k_bbl_sed-1,ip) 
+                wti(i,k_bbl_sed,ip) = wti(i,k_bbl_sed,ip) +  dVV(i,k_bbl_sed,1)/hz(k_bbl_sed)*wti(i,k_bbl_sed-1,ip) 
                 ! dVV/hz is the share of particles present in the bottom layer that should be burried  
             endif    
         end do        
