@@ -505,8 +505,9 @@
     real(rk)                            :: hz_bbl_min         !Minimum hz in the BBL [m]
     real(rk)                            :: hz_sed_min         !Minimum hz in the sediments [m]
     real(rk)                            :: hz_sed_max         !Maximum hz in the sediments [m]
-    real(rk)                            :: scale_fac, scale_fac_next !Scale factors to ensure that total BBL thickness = bbl_thickness
-    real(rk)                            :: mult_bbl         ! Scale factor to increase resolution in the BBL (=1)
+    real(rk)                            :: mult_bbl           !Common ratio for the geometric progression of BBL layer thicknesses (hz(n) = hz_bbl_min*(mult_bbl^n), mult_bbl > 1, default = 2)
+    real(rk)                            :: scale_fac          !Scale factor to ensure that total BBL thickness = bbl_thickness
+    real(rk)                            :: new_hz             !Temporal variable to calculate the new thickness of a BBL layer
     integer                             :: k
 
     ! The grid structure is:
@@ -553,57 +554,78 @@
     if (bbl_thickness.gt.hz(k_wat_bbl)) then
         write(*,*) "Requested BBL thickness exceeds input thickness of bottom pelagic layer: cannot insert BBL"
         stop
-    else
-        z(k_wat_bbl) = z_w(k_wat_bbl) - 0.5_rk*bbl_thickness
-        hz(k_wat_bbl) = hz_w(k_wat_bbl) - bbl_thickness
-        dz(k_wat_bbl-1) = dz_w(k_wat_bbl-1) - 0.5_rk*bbl_thickness
     end if
-
-    mult_bbl=0.5_rk
-
+    
+    mult_bbl=2.0_rk                                      ! mult_bbl should be larger than 1 to ensure successive layers are thicker
+    hz(k_wat_bbl) = hz_w(k_wat_bbl) - bbl_thickness      ! Adjusting the thickness of the bottom layer
     !Define the grid in the BBL
+    hz(k_wat_bbl+1) = hz_bbl_min                         ! Introducing the thinnest layer in the BBL   
+    
     do k=k_wat_bbl+1,k_max
-        hz(k)   = bbl_thickness*(0.5_rk**(k-k_wat_bbl))
-        dz(k-1) = 0.5_rk*(hz(k-1)+hz(k))
-        z(k)    = z(k-1) + dz(k-1)   !The prescribed BBL thickness is traversed with layers geometrically decreasing in thickness
-        scale_fac_next = bbl_thickness / (0.5_rk*hz(k)+sum(hz(k_wat_bbl+1:k))) !Rescaling factor after the NEXT layer is included
-        if (0.5_rk*hz(k)*scale_fac_next<hz_bbl_min) then !If the NEXT layer will be too thin (after rescaling), complete the BBL by rescaling all layers so that total thickness = bbl_thickness
-            scale_fac = mult_bbl*bbl_thickness/sum(hz(k_wat_bbl+1:k))
-            hz(k_wat_bbl+1:k) = scale_fac * hz(k_wat_bbl+1:k)
-            hz(k)=hz(k)-hz_sed_min  !here we add one thin (hz_sed_min) layer above the SWI
-            hz(k+1)=hz_sed_min
-            k_bbl_sed = k+1
-!            k_bbl_sed = k
-            goto 1
-        end if
+        new_hz = hz_bbl_min * (mult_bbl**(k-k_wat_bbl))  ! hz(n) = hz(1)*(mult_bbl^n)
+        ! Calculate cumulative sum and check if it exceeds bbl_thickness
+        if (sum(hz(k_wat_bbl+1:k)) + new_hz <= (bbl_thickness - hz_sed_min)) then            
+            hz(k_wat_bbl+2:k+2) = hz(k_wat_bbl+1:k)      ! Moving the layers downwards
+            hz(k_wat_bbl+1) = new_hz                     ! Insterting the new layer 
+        else
+            k_bbl_sed = k + 1                            ! Defining the BBL-sediment interface layer
+            hz(k_bbl_sed) = hz_sed_min
+            exit  ! Exit loop
+        end if       
     end do
-1   continue
+    ! Rescaling layers to adjust the thickness to bbl_thickness
+    scale_fac = (bbl_thickness - hz_sed_min) / sum(hz(k_wat_bbl+1:k_bbl_sed))
+    hz(k_wat_bbl+1:k_bbl_sed-1) = scale_fac * hz(k_wat_bbl+1:k_bbl_sed-1)
+    hz(k_wat_bbl+1) = hz(k_wat_bbl+1) - (sum(hz(k_wat_bbl+1:k_bbl_sed)) - bbl_thickness)    ! Adjusting the first boundary layer
 
-
-    !Recalculate dz and z using the rescaled hz
-    do k=k_wat_bbl+1,k_bbl_sed
-        dz(k-1) = 0.5_rk*(hz(k-1)+hz(k))
-        z(k)    = z(k-1) + dz(k-1)
+    ! Grid in the sediments
+    do k = k_bbl_sed + 1, k_max
+        hz(k) = min(hz_sed_min * (2.0**(k - k_bbl_sed-1)), hz_sed_max)
     end do
 
+    ! Calculating depths and dz from the rescaled hz values in the BBL and sediment layers
+    z(k_wat_bbl) = z(k_wat_bbl) - bbl_thickness - hz(k_wat_bbl) * 0.5_rk ! Adjust depth (z) at the deepest layer of the water column
+    dz(k_wat_bbl-1) = z(k_wat_bbl) - z(k_wat_bbl-1)                      ! Updating the distance (dz) to the previous layer
 
-    !Define the grid in the sediments
-    do k=k_bbl_sed+1,k_max
-        hz(k)   = min(hz_sed_min*(2.0_rk**(k-k_bbl_sed-1)), hz_sed_max)
-        dz(k-1) = 0.5_rk*(hz(k-1)+hz(k))
-        z(k)    = z(k-1) + dz(k-1)  !Layer thickness is increased geometrically from minimum value hz(k_bbl_sed+1) = hz_sed_min
+    ! Estimating depths and distances between layers in BBL and sediments
+    do k = k_wat_bbl + 1, k_max
+        dz(k-1) = 0.5 * (hz(k-1) + hz(k))
+        z(k) = z(k-1) + dz(k-1)
     end do
-    dz(k_max) = 0.0_rk
 
 
     !Record the vertical grid in an ascii output file
     open(10,FILE = 'Vertical_grid.dat')
     write(10,'(5h k   ,6hz[k]    ,6hdz[k]   ,7hhz[k]  )')
     do k=1,k_max
-        write(10,'(1x,i4, 1x,f9.4, 5h _o_ , 1x,f9.4)') k,z(k),hz(k)
-        write(10,'(2x,i4, 6h ====  , 1x,f8.4,6h ====  )') k,dz(k)
+        if (k == k_wat_bbl) then
+            write(10,'(1x,i4, 1x,f9.4, 5h _o_ , 1x,f9.4, " <- k_wat_bbl")') k, z(k), hz(k)
+        else if (k == k_bbl_sed) then
+            write(10,'(1x,i4, 1x,f9.4, 5h _o_ , 1x,f9.4, " <- k_bbl_sed")') k, z(k), hz(k)
+        else
+            write(10,'(1x,i4, 1x,f9.4, 5h _o_ , 1x,f9.4)') k, z(k), hz(k)
+        end if
+        write(10,'(2x,i4, 6h ====  , 1x,f8.4,6h ====  )') k, dz(k)
     end do
     close(10)
+
+    open(10,FILE = 'Vertical_grid_flat.dat', status='unknown', action='write')
+    write(10, '(A)') 'k,z,dz,hz,Layer Type'  ! Header
+    do k = 1, k_max
+        if (k < k_wat_bbl) then 
+            write(10, '(I4, ",", F13.5, ",", F13.5, ",", F13.5, ",", A12)') k, z(k), dz(k), hz(k), 'water'
+        else if (k == k_wat_bbl) then
+            write(10, '(I4, ",", F13.5, ",", F13.5, ",", F13.5, ",", A12)') k, z(k), dz(k), hz(k), 'water-BBL'
+        else if (k > k_wat_bbl .and. k < k_bbl_sed) then
+            write(10, '(I4, ",", F13.5, ",", F13.5, ",", F13.5, ",", A12)') k, z(k), dz(k), hz(k), 'BBL'
+        else if (k == k_bbl_sed) then
+            write(10, '(I4, ",", F13.5, ",", F13.5, ",", F13.5, ",", A12)') k, z(k), dz(k), hz(k), 'BBL-sediment'
+        else
+            write(10, '(I4, ",", F13.5, ",", F13.5, ",", F13.5, ",", A12)') k, z(k), dz(k), hz(k), 'sediment'
+        end if        
+    end do
+    close(10) 
+
 
     end subroutine make_vert_grid
 !=======================================================================================================================
