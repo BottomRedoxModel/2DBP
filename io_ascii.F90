@@ -42,7 +42,7 @@
 
     public find_index, porting_initial_state_variables, init_common, saving_state_variables, saving_state_variables_diag,&
            get_brom_par, get_brom_name, svan, make_vert_grid, input_primitive_physics, input_ascii_physics, &
-           make_physics_bbl_sed
+           make_physics_bbl_sed, find_closest_index
 
     contains
 
@@ -267,7 +267,36 @@
 !=======================================================================================================================
 
 
+!=======================================================================================================================
 
+    function find_closest_index(array, value) result(index)
+        !> This function finds the index of the closest value in an array to a given value, considering a tolerance.
+        !! 
+        !! @param array The input array of real numbers.
+        !! @param value The value to which the closest array element is to be found.
+        !! @return index The index of the element in the array that is closest to the given value.
+            implicit none
+            
+            ! Arguments
+            real(rk), intent(in) :: array(:)  !< Array with values (e.g. depths in the vertical grid)
+            real(rk), intent(in) :: value     !< The value to find the closest match for.
+            
+            ! Local variables
+            integer :: index              !< The index of the closest value.
+            real(rk), allocatable :: diff(:)  !< Array to store the absolute differences.
+    
+            ! Compute the absolute differences
+            allocate(diff(size(array)))
+            diff = abs(array - value)
+    
+            ! Find the index of the minimum difference
+            index = minloc(diff, dim=1)
+    
+            ! Deallocate the temporary array
+            deallocate(diff)
+        end function find_closest_index
+    
+    !=======================================================================================================================
 
 
 
