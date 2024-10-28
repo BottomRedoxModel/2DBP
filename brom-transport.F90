@@ -10,7 +10,7 @@
 !-----------------------------------------------------------------------
 ! Original author(s): Evgeniy Yakushev, Shamil Yakubov,
 !                     Elizaveta Protsenko, Phil Wallhead,
-!                     Anfisa Berezina, Matvey Novikov
+!                     Anfisa Berezina, Matvey Novikov, Beatriz Arellano-Nava
 !-----------------------------------------------------------------------
 !
 ! Code was adapted for FABM-1.0.3
@@ -98,7 +98,7 @@
     !    integer                                   :: k_sed(k_max-k_bbl_sed), k_sed1(k_max+1-k_bbl_sed), k_bbl1(k_bbl_sed-k_wat_bbl)
         real(rk)                                  :: z_wat_bbl, z_bbl_sed, kz_gr !, z1(k_max+1), z_s1(k_max+1), phi1(i_max,k_max+1)
         integer                                   :: dynamic_kz_bbl
-        real(rk)                                  :: kz_bbl_max, dbl_thickness, kz_mol0
+        real(rk)                                  :: kz_bbl_max, hz_sed_min, dbl_thickness, kz_mol0
         real(rk)                                  :: a1_bioirr, a2_bioirr
         real(rk)                                  :: kz_bioturb_max, z_const_bioturb, z_decay_bioturb
         real(rk)                                  :: phi_0, phi_inf, z_decay_phi, w_binf, rho_def, wat_con_0, wat_con_inf
@@ -153,6 +153,7 @@
         k_min = get_brom_par("k_min")
         k_storm = get_brom_par("k_storm")
     !    k_wat_bbl = get_brom_par("k_wat_bbl")
+        hz_sed_min = get_brom_par("hz_sed_min")
         k_wat_bbl_manual = get_brom_par("k_wat_bbl_manual")
         k_points_below_water = get_brom_par("k_points_below_water")
         i_min = get_brom_par("i_min")
@@ -595,9 +596,6 @@
         
         is_solid(26:28) = 1
 
-        
-        is_solid(26:28) = 1
-
         do ip=1,par_max
             if (is_gas(ip).eq.1) then
                 write(*,*) "Gaseous variable: ", trim(par_name(ip))   
@@ -965,9 +963,12 @@
     
         integer      :: ist, istep ! AB
         integer      :: i_count_pr, i_count_s, i_sec_pr
-    
+
+        integer      :: trawling_switch                  ! Switch to run a trawling experiment
+        integer      :: k_trawling,k_erosion,i_trawling,start_trawling,k_suspension, closest_k_depth  ! Auxiliary integer variables for bottom trawling experiments
+
         integer      :: k_inj,i_inj,inj_switch,inj_num,start_inj,stop_inj    !#number of layer and column to inject into, start day, stop day number
-        integer      :: start_inj2,stop_inj2,start_inj3,stop_inj3    !#number of layer and column to inject into, start day, stop day number
+        integer      :: start_inj2,stop_inj2,start_inj3,stop_inj3    !#start day, stop day number for several injections
         real(rk)     :: cnpar                            !"Implicitness" parameter for GOTM vertical diffusion (set in brom.yaml)
         real(rk)     :: cc0                              !Resilient concentration (same for all variables)
         real(rk)     :: omega                            !angular frequency of sinusoidal forcing = 2*pi/365 rads/day
@@ -983,6 +984,15 @@
         real(rk)     :: injection_rate                   ! injection rate
         real(rk)     :: injection_rate_ini               ! injection rate initial constant or multiplier if injection rate is a function
         real(rk)     :: start_inj_part_day     ! share of day to start injection first day (0=midnight, 0.75= 18h00m etc.)
+        real(rk)     :: depth_trawling         ! Penetration depth of the trawling device in the sediments [m].
+        real(rk)     :: depth_erosion          ! Depth of the eroded layer during trawling [m].
+        real(rk)     :: thickness_suspension   ! Thickness of the water layer where resuspension occurs [m].
+        real(rk)     :: vol_trawling           ! Volume of a set of layers where substances are mixed after trawling
+        real(rk)     :: mass_trawling          ! mass of state variable (cc) in a set of layers during trawling.
+        real(rk)     :: sumdz                  ! Depth within the sediments to interpolate with layers beneath
+        real(rk)     :: interp_slope           ! auxiliar variable to interpolate bottom layers of sediments onto upper layers after a trawling event
+        
+
         character(len=attribute_length), allocatable, dimension(:)    :: inj_var_name
     
         omega = 2.0_rk*pi/365.0_rk
@@ -1021,6 +1031,21 @@
         stop_inj2 = get_brom_par("stop_inj2")
         start_inj3 = get_brom_par("start_inj3")
         stop_inj3 = get_brom_par("stop_inj3")
+        trawling_switch = get_brom_par("trawling_switch")
+        depth_erosion = get_brom_par("depth_erosion")
+        depth_trawling = get_brom_par("depth_trawling")
+        thickness_suspension = get_brom_par("thickness_suspension")
+        i_trawling = get_brom_par("i_trawling")
+        start_inj = get_brom_par("start_inj")
+        start_inj_part_day = get_brom_par("start_inj_part_day")
+        stop_inj = get_brom_par("stop_inj")
+        start_inj2 = get_brom_par("start_inj2")
+        stop_inj2 = get_brom_par("stop_inj2")
+        start_inj3 = get_brom_par("start_inj3")
+        stop_inj3 = get_brom_par("stop_inj3")
+        start_trawling = get_brom_par("start_trawling")
+
+
         !i_sec_pr = get_brom_par("i_sec_pr")
         idt = int(86400._rk/dt)                     !number of cycles per day
         kzti = 0.0_rk
@@ -1059,9 +1084,6 @@
             if (julianday==1) model_year = model_year + 1
     
         if (k_points_below_water.gt.0) then
-            write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
-                  "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
-                  "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
             write (*,'(a, i4, a, i4, 3(a, f10.4))') " model year:", model_year, "; julianday:", julianday, &
                   "; w_sed 0 (cm/yr):", wti(1,k_bbl_sed,1)*365.*8640000., &
                   "; w_sed 1 (cm/yr):", wti(1,k_bbl_sed+1,1)*365.*8640000.              
@@ -1417,6 +1439,9 @@
                   !       dt/freq_float &  ! w/o  for MgOH2
                   !  +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
                     +  dt*inj_smth(model_year+1)/(inj_square*dz(k_inj))
+
+                cc(i_inj,k_inj,id_Ci_dis)=cc(i_inj,k_inj,id_Ci_dis) &
+                        +  dt*0.001_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))                         
             else     
               if (i_day.ge.start_inj.and.i_day.lt.stop_inj) then
                 if (inj_switch.eq.1)  then
@@ -1427,6 +1452,10 @@
                     cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
                       !       dt/freq_float &  ! w/o  for MgOH2
                         +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
+
+                    cc(i_inj,k_inj,id_Ci_dis)=cc(i_inj,k_inj,id_Ci_dis) &
+                        +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))                            
+
     !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
     !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
                     ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
@@ -1461,6 +1490,93 @@
               endif
             end if
           endif
+
+         !________Bottom Trawling____________________!
+          if (trawling_switch.ne.0)  then
+            if (i_day+1.eq.start_trawling.and.id.eq.1) then
+                write (*,*)  "Trawling bottom "
+                ! Calculating indices for the layers where erosion and resuspension occurs
+                k_suspension = find_closest_index(z, z(k_bbl_sed)-thickness_suspension)
+                k_erosion = find_closest_index(z, z(k_bbl_sed+1)+depth_erosion)
+                k_trawling = find_closest_index(z, z(k_bbl_sed+1)+depth_trawling-depth_erosion)    
+                
+
+                do ip = 1, par_max
+                    ! Calculating the mass of each substance eroded from the sediments
+                    mass_trawling=0.0_rk
+                    do k=k_bbl_sed+1,k_erosion
+                        mass_trawling = mass_trawling + (cc(i_trawling,k,ip)*(dx(i_trawling)*dy*hz(k)))
+                    enddo
+                     
+                    ! Calculating volume of layer where the eroded mass (mass_trawling) will be resuspended  
+                    vol_trawling = 0.0_rk    
+                    do k=k_suspension, k_bbl_sed
+                        vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
+                    enddo                    
+                    
+                    
+                    ! Calculating changes of concentratations in the water column due to resuspension          
+                    do k=k_suspension, k_bbl_sed
+                        cc(i_trawling,k,ip) = cc(i_trawling,k,ip) + (mass_trawling / vol_trawling)    
+                    enddo
+            
+
+                    ! Set concentration in the upper sediment layer equal to the top of the remaining sediment layer
+                    cc(i_trawling, k_bbl_sed + 1, ip) = cc(i_trawling, k_erosion + 1, ip)                 
+                    sumdz = 0.0_rk
+                    ! Moving the remaining sediment layers upwards
+                    do k=k_bbl_sed + 2, k_max - 1                        
+                        sumdz = sumdz + dz(k-1)
+                        if ((z(k_erosion + 1)+sumdz).lt.z(k_max)) then
+                            closest_k_depth = find_closest_index(z, z(k_erosion + 1)+sumdz)
+                            ! If the depth is close enough to the depth of a layer beneath, the concentration is just moved upwards
+                            if (abs(z(closest_k_depth) - (z(k_erosion + 1) + sumdz)) < hz_sed_min) then                            
+                                cc(i_trawling,k, ip) = cc(i_trawling, closest_k_depth, ip)    
+                            else 
+                            !g Otherwise interpolate the value
+                                if (z(closest_k_depth).gt.(z(k_erosion + 1)+sumdz)) closest_k_depth = closest_k_depth - 1
+                                ! Interpolating values onto the layers with higher resolution
+                                interp_slope = (cc(i_trawling, closest_k_depth + 1, ip)- cc(i_trawling, closest_k_depth , ip))/ dz(closest_k_depth)                       
+                                cc(i_trawling, k, ip) = cc(i_trawling, k-1, ip) + dz(k-1) * interp_slope 
+                            endif
+                        else 
+                        ! Repeat the values from the deepest sediment layer in the remaining bottom layers
+                            cc(i_trawling,k, ip) = cc(i_trawling, k_max-1, ip)
+                        endif
+                    enddo
+                    
+                    ! Homogenizing concentrations of solids in the remaining sediment layer and mixing solutes with those in the water column                    
+                    if (is_solid(ip).eq.1) then
+                        mass_trawling = 0.0_rk
+                        vol_trawling  = 0.0_rk
+                        do k=k_bbl_sed+1,k_trawling
+                            ! Calculate the total mass and volume of the remaining top sediment layer
+                            mass_trawling = mass_trawling + (cc(i_trawling,k,ip) * (dx(i_trawling)*dy*hz(k)))
+                            vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
+                        enddo
+
+                        do k=k_bbl_sed+1,k_trawling
+                            ! Homogenizing concentrations of solids in the top layer
+                            cc(i_trawling,k,ip)= mass_trawling / vol_trawling                   
+                        enddo
+                    else 
+                        !g If they are solutes, they are mixed with those dissolved in the resuspension layer
+                        mass_trawling = 0.0_rk
+                        vol_trawling  = 0.0_rk
+                        do k=k_suspension,k_trawling
+                            ! Calculate the total mass and volume of the remaining top sediment layer together with the suspension layer
+                            mass_trawling = mass_trawling + (cc(i_trawling,k,ip) * (dx(i_trawling)*dy*hz(k)))
+                            vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
+                        enddo
+                        do k=k_suspension,k_trawling
+                            ! Mixing solutes in the interface
+                            cc(i_trawling,k,ip) = mass_trawling / vol_trawling
+                        enddo
+                    endif         
+                enddo                    
+            endif
+          endif
+
     
             !________Check for NaNs (stopping if any found)____________________!
             do ip=1,par_max

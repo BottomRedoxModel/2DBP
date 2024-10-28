@@ -8,7 +8,8 @@
 ! the COPYING file at the root of the BROM distribution.
 !-----------------------------------------------------------------------
 ! Original author(s): Evgeniy Yakushev, Shamil Yakubov,
-!                     Elizaveta Protsenko, Phil Wallhead, Anfisa Berezina
+!                     Elizaveta Protsenko, Phil Wallhead, Anfisa Berezina, 
+!                     Beatriz Arellano-Nava
 !-----------------------------------------------------------------------
 
 
@@ -298,10 +299,11 @@
       dz_w(1:k_wat_bbl-1) = z_w(2:k_wat_bbl) - z_w(1:k_wat_bbl-1)
       dz_w(k_wat_bbl) = 0.0_rk
       !Layer thicknesses (hz_w)
-      hz_w(1) = dz_w(1)
+      hz_w(1) = z_w(1) + 0.5_rk*dz_w(1)
       do j=2,k_wat_bbl
           hz_w(j) = 0.5_rk*(dz_w(j-1)+dz_w(j))
       end do
+
       !Set the water temperature (t_w), salinity (s_w), vertical diffusivity (kz_w),
       !and (if required) the surface irradiance (Eair) and ice thickness (hice)
     !  do istep=1,steps_in_yr-1 !Loop over hours
