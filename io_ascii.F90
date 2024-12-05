@@ -537,6 +537,7 @@
         real(rk)                            :: mult_bbl           !Common ratio for the geometric progression of BBL layer thicknesses (hz(n) = hz_bbl_min*(mult_bbl^n), mult_bbl > 1, default = 2)
         real(rk)                            :: scale_fac          !Scale factor to ensure that total BBL thickness = bbl_thickness
         real(rk)                            :: new_hz             !Temporal variable to calculate the new thickness of a BBL layer
+        integer                             :: extra_layer        !If the deepest layer is too thin (1.5 times the BBL), it is converted into the BBL
         integer                             :: k
     
         ! The grid structure is:
@@ -566,36 +567,44 @@
     
     
     
-        !Get parameters from brom.yaml
+        !Getting parameters from brom.yaml
         bbl_thickness = get_brom_par("bbl_thickness")
         hz_bbl_min = get_brom_par("hz_bbl_min")
         hz_sed_min = get_brom_par("hz_sed_min")
         hz_sed_max = get_brom_par("hz_sed_max")
     
     
-        !Define layer midpoint depths [m] and their thicknesses/increments in the water column
+        !Defining layer midpoint depths [m] and their thicknesses/increments in the water column
         z(1:k_wat_bbl) = z_w(1:k_wat_bbl)
         hz(1:k_wat_bbl) = hz_w(1:k_wat_bbl)
         dz(1:k_wat_bbl-1) = dz_w(1:k_wat_bbl-1)
     
     
-        !Adjust the input grid to allow high-resolution BBL to be inserted (if not too thick)
+        !Adjusting the input grid to allow high-resolution BBL to be inserted (if not too thick)
         if (bbl_thickness.gt.hz(k_wat_bbl)) then
             write(*,*) "Requested BBL thickness exceeds input thickness of bottom pelagic layer: cannot insert BBL"
             stop
         end if
         
         mult_bbl=2.0_rk                                      ! mult_bbl should be larger than 1 to ensure successive layers are thicker
-        hz(k_wat_bbl) = hz_w(k_wat_bbl) - bbl_thickness      ! Adjusting the thickness of the bottom layer
-        !Define the grid in the BBL
-        hz(k_wat_bbl+1) = hz_bbl_min                         ! Introducing the thinnest layer in the BBL   
+
+        if ((hz(k_wat_bbl) - bbl_thickness) <= bbl_thickness / 2.0) then ! if the deepest layer is thinner than 1.5 times the BBL thickness
+            extra_layer = 1                                              ! The deepest layer becomes the BBL
+            bbl_thickness = hz(k_wat_bbl)
+        else
+            hz(k_wat_bbl) = hz_w(k_wat_bbl) - bbl_thickness      ! Otherwise adjusts the thickness of the bottom layer
+            extra_layer = 0
+        end if      
+
+        !Defining the grid in the BBL
+        hz(k_wat_bbl+1-extra_layer) = hz_bbl_min                         ! Introducing the thinnest layer in the BBL   
         
-        do k=k_wat_bbl+1,k_max
-            new_hz = hz_bbl_min * (mult_bbl**(k-k_wat_bbl))  ! hz(n) = hz(1)*(mult_bbl^n)
-            ! Calculate cumulative sum and check if it exceeds bbl_thickness
-            if (sum(hz(k_wat_bbl+1:k)) + new_hz <= (bbl_thickness - hz_sed_min)) then            
-                hz(k_wat_bbl+2:k+2) = hz(k_wat_bbl+1:k)      ! Moving the layers downwards
-                hz(k_wat_bbl+1) = new_hz                     ! Insterting the new layer 
+        do k=k_wat_bbl+1-extra_layer,k_max
+            new_hz = hz_bbl_min * (mult_bbl**(k-k_wat_bbl+extra_layer))  ! hz(n) = hz(1)*(mult_bbl^n)            
+            ! Calculating cumulative sum and check if it exceeds bbl_thickness
+            if (sum(hz(k_wat_bbl+1-extra_layer:k)) + new_hz <= (bbl_thickness - hz_sed_min)) then            
+                hz(k_wat_bbl+2-extra_layer:k+2) = hz(k_wat_bbl+1-extra_layer:k)      ! Moving the layers downwards
+                hz(k_wat_bbl+1-extra_layer) = new_hz                     ! Insterting the new layer 
             else
                 k_bbl_sed = k + 1                            ! Defining the BBL-sediment interface layer
                 hz(k_bbl_sed) = hz_sed_min
@@ -603,9 +612,9 @@
             end if       
         end do
         ! Rescaling layers to adjust the thickness to bbl_thickness
-        scale_fac = (bbl_thickness - hz_sed_min) / sum(hz(k_wat_bbl+1:k_bbl_sed))
-        hz(k_wat_bbl+1:k_bbl_sed-1) = scale_fac * hz(k_wat_bbl+1:k_bbl_sed-1)
-        hz(k_wat_bbl+1) = hz(k_wat_bbl+1) - (sum(hz(k_wat_bbl+1:k_bbl_sed)) - bbl_thickness)    ! Adjusting the first boundary layer
+        scale_fac = (bbl_thickness - hz_sed_min) / sum(hz(k_wat_bbl+1-extra_layer:k_bbl_sed))
+        hz(k_wat_bbl+1-extra_layer:k_bbl_sed-1) = scale_fac * hz(k_wat_bbl+1-extra_layer:k_bbl_sed-1)
+        hz(k_wat_bbl+1-extra_layer) = hz(k_wat_bbl+1-extra_layer) - (sum(hz(k_wat_bbl+1-extra_layer:k_bbl_sed)) - bbl_thickness)    ! Adjusting the first boundary layer
     
         ! Grid in the sediments
         do k = k_bbl_sed + 1, k_max
@@ -613,8 +622,8 @@
         end do
     
         ! Calculating depths and dz from the rescaled hz values in the BBL and sediment layers
-        z(k_wat_bbl) = z(k_wat_bbl) - bbl_thickness - hz(k_wat_bbl) * 0.5_rk ! Adjust depth (z) at the deepest layer of the water column
-        dz(k_wat_bbl-1) = z(k_wat_bbl) - z(k_wat_bbl-1)                      ! Updating the distance (dz) to the previous layer
+        z(k_wat_bbl) = z(k_wat_bbl-1)  +(hz(k_wat_bbl-1) + hz(k_wat_bbl))* 0.5_rk ! Adjust depth (z) at the deepest layer of the water column
+        dz(k_wat_bbl-1) = z(k_wat_bbl) - z(k_wat_bbl-1)                           ! Updating the distance (dz) to the previous layer
     
         ! Estimating depths and distances between layers in BBL and sediments
         do k = k_wat_bbl + 1, k_max
