@@ -1452,7 +1452,7 @@
                     !"         +86400.0_rk*dt/freq_float &
                     !"         *injection_rate/(dx(i_inj)*dy*dz(k_inj))
                     !cc(:,k_inj,inj_num)=cc(:,k_inj,inj_num)+86400.0_rk*dt*injection_rate/(dx(i_inj)*dx(i_inj)*dz(k_inj))
-    
+    !comment
                     do k=2,k_inj
     !                  injection_rate = dz(k-1)*injection_rate_ini/(z(k_inj)-z(1)) !uniform distr. in the layer 0-k_inj
                      injection_rate = dz(k_inj-k-1)*injection_rate_ini/(z(k_inj)-z(1))    !"triangle weight"  distr. in the layer 0-k_inj
