@@ -4,3 +4,6 @@ out/
 build/
 ./vscode
 *.code-workspace
+2dbp.code-workspace
+CMakeUserPresets.json
+*.mod
