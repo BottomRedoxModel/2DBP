@@ -3,4 +3,4 @@ cmake/
 out/
 build/
 ./vscode
-2dbp.code-workspace
+*.code-workspace
