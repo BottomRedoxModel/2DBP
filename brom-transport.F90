@@ -16,6 +16,7 @@
 ! More info https://github.com/fabm-model/fabm/wiki/FABM-1.0
 !-----------------------------------------------------------------------
     module brom_transport
+                                                                                                                                                                                                                                                                        
 
         ! AB check fabm subroutines
         use fabm_omp
@@ -97,7 +98,6 @@
     !    integer                                   :: k_sed(k_max-k_bbl_sed), k_sed1(k_max+1-k_bbl_sed), k_bbl1(k_bbl_sed-k_wat_bbl)
         real(rk)                                  :: z_wat_bbl, z_bbl_sed, kz_gr !, z1(k_max+1), z_s1(k_max+1), phi1(i_max,k_max+1)
         integer                                   :: dynamic_kz_bbl
-        real(rk)                                  :: kz_bbl_max, hz_sed_min, dbl_thickness, kz_mol0
         real(rk)                                  :: kz_bbl_max, hz_sed_min, dbl_thickness, kz_mol0
         real(rk)                                  :: a1_bioirr, a2_bioirr
         real(rk)                                  :: kz_bioturb_max, z_const_bioturb, z_decay_bioturb
@@ -966,11 +966,6 @@
 
         integer      :: trawling_switch                  ! Switch to run a trawling experiment
         integer      :: k_trawling,k_erosion,i_trawling,start_trawling,k_suspension, closest_k_depth  ! Auxiliary integer variables for bottom trawling experiments
-
-
-        integer      :: trawling_switch                  ! Switch to run a trawling experiment
-        integer      :: k_trawling,k_erosion,i_trawling,start_trawling,k_suspension, closest_k_depth  ! Auxiliary integer variables for bottom trawling experiments
-
         integer      :: k_inj,i_inj,inj_switch,inj_num,start_inj,stop_inj    !#number of layer and column to inject into, start day, stop day number
         integer      :: start_inj2,stop_inj2,start_inj3,stop_inj3    !#start day, stop day number for several injections
         real(rk)     :: cnpar                            !"Implicitness" parameter for GOTM vertical diffusion (set in brom.yaml)
@@ -996,16 +991,6 @@
         real(rk)     :: sumdz                  ! Depth within the sediments to interpolate with layers beneath
         real(rk)     :: interp_slope           ! auxiliar variable to interpolate bottom layers of sediments onto upper layers after a trawling event
         
-
-        real(rk)     :: depth_trawling         ! Penetration depth of the trawling device in the sediments [m].
-        real(rk)     :: depth_erosion          ! Depth of the eroded layer during trawling [m].
-        real(rk)     :: thickness_suspension   ! Thickness of the water layer where resuspension occurs [m].
-        real(rk)     :: vol_trawling           ! Volume of a set of layers where substances are mixed after trawling
-        real(rk)     :: mass_trawling          ! mass of state variable (cc) in a set of layers during trawling.
-        real(rk)     :: sumdz                  ! Depth within the sediments to interpolate with layers beneath
-        real(rk)     :: interp_slope           ! auxiliar variable to interpolate bottom layers of sediments onto upper layers after a trawling event
-        
-
         character(len=attribute_length), allocatable, dimension(:)    :: inj_var_name
     
         omega = 2.0_rk*pi/365.0_rk
@@ -1449,12 +1434,7 @@
                     inj_num = ip+1
                 end do
                 cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
-                  !       dt/freq_float &  ! w/o  for MgOH2
-                  !  +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
-                    +  dt*inj_smth(model_year+1)/(inj_square*dz(k_inj))
-
-                cc(i_inj,k_inj,id_Ci_dis)=cc(i_inj,k_inj,id_Ci_dis) &
-                        +  dt*0.001_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))                         
+                    +  dt*inj_smth(model_year+1)/(dx(i_inj)*dy*dz(k_inj))
             else     
               if (i_day.ge.start_inj.and.i_day.lt.stop_inj) then
                 if (inj_switch.eq.1)  then
@@ -1463,24 +1443,7 @@
                         inj_num = ip+1
                     end do
                     cc(i_inj,k_inj,inj_num)=cc(i_inj,k_inj,inj_num) &
-                      !       dt/freq_float &  ! w/o  for MgOH2
                         +  dt*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))
-
-                    cc(i_inj,k_inj,id_Ci_dis)=cc(i_inj,k_inj,id_Ci_dis) &
-                        +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))                            
-
-    !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
-    !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
-                    ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
-                   ! +  dt*0.188_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !3%
-                  !  cc(i_inj,k_inj,id_Alk)=cc(i_inj,k_inj,id_Alk) &
-                  !      +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    
-    !                cc(i_inj,k_inj,id_CaCO3)=cc(i_inj,k_inj,id_CaCO3) &
-    !               +  dt*0.5_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    ! 5%
-                    ! +  dt*0.251_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !5%
-                   ! +  dt*0.188_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    !3%
-                  !  cc(i_inj,k_inj,id_Alk)=cc(i_inj,k_inj,id_Alk) &
-                  !      +  dt*0.053_rk*injection_rate_ini/(dx(i_inj)*dy*dz(k_inj))    
                 else
                   if (i_day.ne.start_inj.or.(real(id)/real(idt)).gt.start_inj_part_day) then
                     inj_switch=0 !!!!!! we do it only once
