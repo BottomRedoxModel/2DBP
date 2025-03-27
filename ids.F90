@@ -26,7 +26,7 @@
                id_SO4, id_DIC, id_Alk, id_pCO2, id_PO4, id_Si, id_Sipart, id_Phy, id_Het, &
                id_Baae, id_Bhae, id_Baan, id_Bhan, id_Hplus, id_CaCO3, id_FeS2, id_MnCO3, &
                id_Ni, id_NiS, id_Ni_biota, id_Ni_POM, id_Ni_DOM, id_Ni_Mn4, id_Ni_FeS, id_Ni_FeS2, &
-               id_BaSO4, id_Ba, id_waste, id_Ci_dis, id_CO2g
+               id_BaSO4, id_Ba, id_waste, id_Ci_free, id_CO2g
     
     integer :: id_mp_free, id_mp_biof, id_mp_het, id_mp_det
     
@@ -94,7 +94,7 @@
     id_Ni_FeS2 = find_index(par_name, 'B_Ni_FeS2')
     id_CO2g = find_index(par_name, 'B_Bubble_CO2g')
     id_waste = find_index(par_name, 'B_INJECTION_waste')
-    id_Ci_dis = find_index(par_name, 'B_PARTIT_Ci_dis')
+    id_Ci_free = find_index(par_name, 'B_PARTIT_Ci_free')
     ! Microplastic    
     id_mp_free = find_index(par_name, 'B_BIOPLAST_MP_free')
     id_mp_biof = find_index(par_name, 'B_BIOPLAST_MP_biof')
