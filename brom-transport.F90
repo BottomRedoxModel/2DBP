@@ -45,7 +45,7 @@
         integer   :: k_min, k_wat_bbl,k_wat_bbl_manual, k_bbl_sed !z-axis related
         integer   :: k_points_below_water, k_max, k_storm !z-axis related
         integer   :: par_max                     !no. BROM variables
-        integer   :: i_day, year, days_in_yr, freq_turb, freq_sed, freq_float, last_day   !time related ! ?? freq_sed, freq_turb
+        integer   :: i_day, year, days_in_yr, freq_turb, freq_sed, freq_float, last_day, multiyears_physics  !time related ! ?? freq_sed, freq_turb
         integer   :: diff_method, kz_bbl_type, bioturb_across_SWI  !vertical diffusivity related
         integer   :: h_adv, h_relax, not_relax_centr, h_turb  !horizontal transport  (advection and relaxation) switches
         integer   :: use_swradWm2, use_hice, use_gargett ! use input for light, ice, calculate Kz
@@ -147,6 +147,7 @@
         freq_sed  = get_brom_par("freq_sed ")
         freq_float  = get_brom_par("freq_float ")
         last_day = get_brom_par("last_day")
+        multiyears_physics = get_brom_par("multiyears_physics")
         water_layer_thickness = get_brom_par("water_layer_thickness")
         k_min = get_brom_par("k_min")
         k_storm = get_brom_par("k_storm")
@@ -237,7 +238,9 @@
         par_max = size(model%interior_state_variables)
     
         steps_in_yr = days_in_yr*24*3600/input_step ! determine how much timesteps in the course of the year
-    
+        if(multiyears_physics.gt.0) then
+            steps_in_yr = last_day*24*3600/input_step ! determine how much timesteps in the course of the year
+        endif 
         !Allocate biological variables now that par_max is known
         allocate(surf_flux(i_max,par_max))     !surface flux (tracer unit * m/s, positive for tracer entering column)
         allocate(bott_flux(i_max,par_max))     !bottom flux (tracer unit * m/s, positive for tracer entering column)
@@ -1134,7 +1137,11 @@
           if (mod(int(id*dt),input_step).eq.0) then
             ist = int((id*int(dt))/input_step)
             istep = int((julianday-1)*(24*3600/input_step)) + ist
-    
+
+            if(multiyears_physics.gt.0) then
+                istep = int((i_day)*(24*3600/input_step)) + ist
+            endif
+            
           ! Reload changes in t, s, light, ice (needed for FABM/biology)
             call model%link_interior_data(fabm_standard_variables%temperature, t(:,:,istep))
             call model%link_interior_data(fabm_standard_variables%practical_salinity, s(:,:,istep))
@@ -1293,7 +1300,7 @@
                end do
                   if (fresh_PM_poros.gt.0.0_rk) then
                     dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,id_POMR))/rho(id_POMR)*(1.0_rk/(1.0_rk-fresh_PM_poros)-1.0_rk) 
-                    dVV(i,k,1)= dVV(i,k,1)+(sink(i,k-1,id_POML))/rho(id_POML)*(1.0_rk/(1.0_rk-fresh_PM_poros)-1.0_rk) 
+
                   endif
             enddo
             i = 1
@@ -1698,10 +1705,10 @@
     !		write(*,*) "id: ", id
             if (ncoutfile_type == 1) then
                 call save_netcdf(i_max, k_max, max(1,julianday), cc, t, s, kz, kzti, wti, model, z, hz, swradWm2, use_swradWm2, hice, use_hice, &
-                fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, i_day+1, id, idt, output_step, input_step, air_sea_flux)
+                fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, i_day+1, id, idt, output_step, input_step, air_sea_flux, multiyears_physics)
             else
                 call save_netcdf(i_max, k_max, max(1,julianday), cc, t, s, kz, kzti, wti, model, z, hz, swradWm2, use_swradWm2, hice, use_hice, &
-                fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, julianday, id, idt, output_step, input_step, air_sea_flux)
+                fick_per_day, sink_per_day, ip_sol, ip_par, x, u_x, julianday, id, idt, output_step, input_step, air_sea_flux, multiyears_physics)
             endif
     !    else
     !        !convert into observarional units in the sediments for dissolved (mass/pore water) and solids (mass/mass) with an exception for biota

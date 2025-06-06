@@ -515,11 +515,11 @@
   !=======================================================================================================================
       subroutine save_netcdf(i_max, k_max, julianday, cc, t, s, kz, kzti, wti, &
           model, z, hz, swradWm2, use_swradWm2, hice, use_hice, fick_per_day, sink_per_day, &
-          ip_sol, ip_par, x, u_x, i_day, id, idt, output_step, input_step, gas_air_sea ) !i_sec_pr) ! i_day here = i_day + 1
+          ip_sol, ip_par, x, u_x, i_day, id, idt, output_step, input_step, gas_air_sea, multiyears_physics ) !i_sec_pr) ! i_day here = i_day + 1
   
       !Input variables
       integer, intent(in)                    :: i_max, k_max, julianday, use_swradWm2, input_step
-      integer, intent(in)                    :: use_hice, ip_sol, ip_par, i_day, id, idt, output_step
+      integer, intent(in)                    :: use_hice, ip_sol, ip_par, i_day, id, idt, output_step, multiyears_physics
       real(rk), dimension(:,:,:), intent(in) :: cc, t, s, kz, kzti, wti, fick_per_day, sink_per_day, u_x, gas_air_sea
       class (type_fabm_model), pointer :: model
       real(rk), dimension(:), intent(in)     :: z, hz, swradWm2, hice, x
@@ -585,10 +585,16 @@
                   end if
               end if
           end do
-          call check_err(nf90_put_var(nc_id, T_id, t(:,:,istep_out), start_cc, count_cc))
-          call check_err(nf90_put_var(nc_id, S_id, s(:,:,istep_out), start_cc, count_cc))
-          call check_err(nf90_put_var(nc_id, Kz_id, kz(:,:,istep_out), start_flux, count_flux))
-  
+          if(multiyears_physics.gt.0) then
+            call check_err(nf90_put_var(nc_id, T_id, t(:,:,i_sec), start_cc, count_cc))
+            call check_err(nf90_put_var(nc_id, S_id, s(:,:,i_sec), start_cc, count_cc))
+            call check_err(nf90_put_var(nc_id, Kz_id, kz(:,:,i_sec), start_flux, count_flux))
+          else
+            call check_err(nf90_put_var(nc_id, T_id, t(:,:,istep_out), start_cc, count_cc))
+            call check_err(nf90_put_var(nc_id, S_id, s(:,:,istep_out), start_cc, count_cc))
+            call check_err(nf90_put_var(nc_id, Kz_id, kz(:,:,istep_out), start_flux, count_flux))
+          endif
+
           if (i_max.gt.1) call check_err(nf90_put_var(nc_id, u_x_id, u_x(:,:,istep_out), start_cc, count_cc))
   
           call check_err(nf90_put_var(nc_id, Kz_sol_id, kzti(:,:,ip_sol), start_flux, count_flux))
