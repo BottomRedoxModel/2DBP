@@ -11,7 +11,7 @@
       "program": "${workspaceFolder}/build/release/brom",
       "args": [], // Possible input args for a.out
       "stopAtEntry": false,
-      "cwd": "/home/ey/cases/varna",
+      "cwd": "/home/ey/cases/bs_mult",
       "environment": [ 
         {
         "name": "OMP_NUM_THREADS",
@@ -35,7 +35,7 @@
       "program": "${workspaceFolder}/build/debug/brom",
       "args": [], // Possible input args for a.out
       "stopAtEntry": false,
-      "cwd": "/home/ey/cases/varna",
+      "cwd": "/home/ey/cases/bs_mult",
       "environment": [ 
         {
         "name": "OMP_NUM_THREADS",
