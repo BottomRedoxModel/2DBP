@@ -31,7 +31,7 @@
     
     !=======================================================================================================================
         subroutine calculate_phys(i, k_max, par_max, model, cc, kzti, fick, dcc, bctype_top, bctype_bottom, bc_top, bc_bottom, &
-            surf_flux, bott_flux, bott_source, k_bbl_sed, dz, hz, kz, kz_mol, kz_bio, julianday, id_O2, K_O2s, dt, freq_turb, &
+            surf_flux, bott_flux, bott_source, k_bbl_sed, dz, hz, kz, kz_mol, kz_bio, istep, julianday, id_O2, K_O2s, dt, freq_turb, &
             diff_method, cnpar, surf_flux_with_diff, bott_flux_with_diff, bioturb_across_SWI, pF1, pF2, phi_inv, is_solid, cc0)
     
         !Calculate vertical diffusion in the water column and sediments
@@ -39,7 +39,7 @@
         implicit none
     
         !Input variables
-        integer, intent(in)                         :: k_max, par_max, k_bbl_sed, julianday, id_O2, freq_turb
+        integer, intent(in)                         :: k_max, par_max, k_bbl_sed, istep, julianday, id_O2, freq_turb
         integer, intent(in)                         :: surf_flux_with_diff, bott_flux_with_diff, bioturb_across_SWI
         integer, dimension(:,:), intent(in)         :: bctype_top, bctype_bottom
         real(rk), dimension(:,:), intent(in)        :: bc_top, bc_bottom, kz_bio, phi_inv
@@ -83,7 +83,7 @@
                 O2stat = 0.0_rk
             endif
             do ip=1,par_max
-                kzti(i,:,ip) = kz(i,:,julianday) + kz_mol(i,:,ip) + kz_bio(i,:)*O2stat
+                kzti(i,:,ip) = kz(i,:,istep) + kz_mol(i,:,ip) + kz_bio(i,:)*O2stat
                 !Total diffusivity = turbulent (zero in sediments) + molecular (zero in water column) + bioturbation (zero in water column)
                 !Note: molecular diffusivity is zero for variables that are solid in the sediments (see io_ascii.f90/make_physics_bbl_sed)
             end do

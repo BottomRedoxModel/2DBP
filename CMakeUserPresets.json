@@ -13,8 +13,8 @@
       "binaryDir": "${sourceDir}/build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "FABM_BASE": "/home/ey/src/fabm-omp-sh",
-        "FABM_NIVA_BASE": "/home/ey/src/BROM/"
+        "FABM_BASE": "../fabm-omp",
+        "FABM_NIVA_BASE": "../BROM/"
       }
     },
     {
@@ -24,8 +24,8 @@
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "FABM_BASE": "/home/ey/src/fabm-omp-sh",
-        "FABM_NIVA_BASE": "/home/ey/src/BROM/"
+        "FABM_BASE": "../fabm-omp",
+        "FABM_NIVA_BASE": "../BROM/"
       }
     }
   ]

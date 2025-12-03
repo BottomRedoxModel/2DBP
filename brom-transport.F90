@@ -967,7 +967,7 @@
         integer      :: bc_units_convert, sediments_units_convert !options for conversion of concentrations units in the sediment
         integer      :: julianday, model_year
     
-        integer      :: ist, istep ! AB
+        integer      :: ist, istep, istep_new ! AB
         integer      :: i_count_pr, i_count_s, i_sec_pr
 
         integer      :: trawling_switch                  ! Switch to run a trawling experiment
@@ -1138,9 +1138,10 @@
                 enddo
             enddo
     
-          if (mod(int(id*dt),input_step).eq.0) then
-            ist = int((id*int(dt))/input_step)
-            istep = int((julianday-1)*(24*3600/input_step)) + ist
+            istep_new = max(1, 1 + nint((dble(i_day-1)*86400.d0 + dble(id-1)*dt) / dble(input_step)))
+            if (istep_new.NE.istep) then
+              ist = int((id*int(dt))/input_step)
+              istep = istep_new
 
             if(multiyears_physics.gt.0) then
                 istep = int((i_day)*(24*3600/input_step)) + ist
@@ -1175,7 +1176,7 @@
                     call calculate_phys(i, k_max, par_max, model, cc, kzti, fick, &
                         dcc, bctype_top, bctype_bottom, bc_top, bc_bottom, &
                         surf_flux, bott_flux, bott_source, k_bbl_sed, dz, hz, kz, &
-                        kz_mol, kz_bio, julianday, id_O2, K_O2s, dt, freq_turb, &
+                        kz_mol, kz_bio, istep, julianday, id_O2, K_O2s, dt, freq_turb, &
                         diff_method, cnpar, surf_flux_with_diff,bott_flux_with_diff, &
                         bioturb_across_SWI, pF1, pF2, phi_inv, is_solid, cc0)
                 enddo
@@ -1475,92 +1476,6 @@
                 endif
               endif
             end if
-          endif
-
-         !________Bottom Trawling____________________!
-          if (trawling_switch.ne.0)  then
-            if (i_day+1.eq.start_trawling.and.id.eq.1) then
-                write (*,*)  "Trawling bottom "
-                ! Calculating indices for the layers where erosion and resuspension occurs
-                k_suspension = find_closest_index(z, z(k_bbl_sed)-thickness_suspension)
-                k_erosion = find_closest_index(z, z(k_bbl_sed+1)+depth_erosion)
-                k_trawling = find_closest_index(z, z(k_bbl_sed+1)+depth_trawling-depth_erosion)    
-                
-
-                do ip = 1, par_max
-                    ! Calculating the mass of each substance eroded from the sediments
-                    mass_trawling=0.0_rk
-                    do k=k_bbl_sed+1,k_erosion
-                        mass_trawling = mass_trawling + (cc(i_trawling,k,ip)*(dx(i_trawling)*dy*hz(k)))
-                    enddo
-                     
-                    ! Calculating volume of layer where the eroded mass (mass_trawling) will be resuspended  
-                    vol_trawling = 0.0_rk    
-                    do k=k_suspension, k_bbl_sed
-                        vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
-                    enddo                    
-                    
-                    
-                    ! Calculating changes of concentratations in the water column due to resuspension          
-                    do k=k_suspension, k_bbl_sed
-                        cc(i_trawling,k,ip) = cc(i_trawling,k,ip) + (mass_trawling / vol_trawling)    
-                    enddo
-            
-
-                    ! Set concentration in the upper sediment layer equal to the top of the remaining sediment layer
-                    cc(i_trawling, k_bbl_sed + 1, ip) = cc(i_trawling, k_erosion + 1, ip)                 
-                    sumdz = 0.0_rk
-                    ! Moving the remaining sediment layers upwards
-                    do k=k_bbl_sed + 2, k_max - 1                        
-                        sumdz = sumdz + dz(k-1)
-                        if ((z(k_erosion + 1)+sumdz).lt.z(k_max)) then
-                            closest_k_depth = find_closest_index(z, z(k_erosion + 1)+sumdz)
-                            ! If the depth is close enough to the depth of a layer beneath, the concentration is just moved upwards
-                            if (abs(z(closest_k_depth) - (z(k_erosion + 1) + sumdz)) < hz_sed_min) then                            
-                                cc(i_trawling,k, ip) = cc(i_trawling, closest_k_depth, ip)    
-                            else 
-                            !g Otherwise interpolate the value
-                                if (z(closest_k_depth).gt.(z(k_erosion + 1)+sumdz)) closest_k_depth = closest_k_depth - 1
-                                ! Interpolating values onto the layers with higher resolution
-                                interp_slope = (cc(i_trawling, closest_k_depth + 1, ip)- cc(i_trawling, closest_k_depth , ip))/ dz(closest_k_depth)                       
-                                cc(i_trawling, k, ip) = cc(i_trawling, k-1, ip) + dz(k-1) * interp_slope 
-                            endif
-                        else 
-                        ! Repeat the values from the deepest sediment layer in the remaining bottom layers
-                            cc(i_trawling,k, ip) = cc(i_trawling, k_max-1, ip)
-                        endif
-                    enddo
-                    
-                    ! Homogenizing concentrations of solids in the remaining sediment layer and mixing solutes with those in the water column                    
-                    if (is_solid(ip).eq.1) then
-                        mass_trawling = 0.0_rk
-                        vol_trawling  = 0.0_rk
-                        do k=k_bbl_sed+1,k_trawling
-                            ! Calculate the total mass and volume of the remaining top sediment layer
-                            mass_trawling = mass_trawling + (cc(i_trawling,k,ip) * (dx(i_trawling)*dy*hz(k)))
-                            vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
-                        enddo
-
-                        do k=k_bbl_sed+1,k_trawling
-                            ! Homogenizing concentrations of solids in the top layer
-                            cc(i_trawling,k,ip)= mass_trawling / vol_trawling                   
-                        enddo
-                    else 
-                        !g If they are solutes, they are mixed with those dissolved in the resuspension layer
-                        mass_trawling = 0.0_rk
-                        vol_trawling  = 0.0_rk
-                        do k=k_suspension,k_trawling
-                            ! Calculate the total mass and volume of the remaining top sediment layer together with the suspension layer
-                            mass_trawling = mass_trawling + (cc(i_trawling,k,ip) * (dx(i_trawling)*dy*hz(k)))
-                            vol_trawling = vol_trawling + (dx(i_trawling) * dy * hz(k))
-                        enddo
-                        do k=k_suspension,k_trawling
-                            ! Mixing solutes in the interface
-                            cc(i_trawling,k,ip) = mass_trawling / vol_trawling
-                        enddo
-                    endif         
-                enddo                    
-            endif
           endif
 
 
